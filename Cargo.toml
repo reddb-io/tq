@@ -1,0 +1,9 @@
+[workspace]
+members = ["crates/toon", "crates/tq"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/reddb-io/tq"
+rust-version = "1.75"
