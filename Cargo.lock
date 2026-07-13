@@ -66,6 +66,7 @@ name = "reddb-io-tq"
 version = "0.1.0"
 dependencies = [
  "reddb-io-toon",
+ "serde_json",
 ]
 
 [[package]]

@@ -1,0 +1,1 @@
+-p json -o json -c .users[]|select(.active)|{name:.name,next:(.score+1)}
