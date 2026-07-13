@@ -21,6 +21,7 @@ pub struct ParseError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
+    Array(Array),
     Bool(bool),
     Null,
     Number(String),
@@ -28,11 +29,38 @@ pub enum Value {
     String(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Array {
+    List(Vec<Value>),
+    Tabular(TabularArray),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TabularArray {
+    fields: Vec<String>,
+    rows: Vec<TabularRow>,
+    delimiter: char,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TabularRow {
+    line: usize,
+    values: Vec<String>,
+}
+
 #[derive(Debug)]
 struct Line<'a> {
     number: usize,
     depth: usize,
     content: &'a str,
+}
+
+#[derive(Debug)]
+struct ArrayHeader {
+    key: String,
+    len: usize,
+    delimiter: char,
+    fields: Option<Vec<String>>,
 }
 
 impl Document {
@@ -58,13 +86,17 @@ impl Document {
     fn write_canonical_toon(&self, output: &mut String, depth: usize) {
         for field in &self.fields {
             output.push_str(&" ".repeat(depth * INDENT_WIDTH));
-            output.push_str(&field.key);
             match &field.value {
+                Value::Array(array) => {
+                    array.write_canonical_toon(output, Some(&field.key), depth);
+                }
                 Value::Object(document) => {
+                    output.push_str(&field.key);
                     output.push_str(":\n");
                     document.write_canonical_toon(output, depth + 1);
                 }
                 value => {
+                    output.push_str(&field.key);
                     output.push_str(": ");
                     output.push_str(&value.to_canonical_toon());
                     output.push('\n');
@@ -95,6 +127,7 @@ impl std::error::Error for ParseError {}
 impl Value {
     pub fn to_canonical_toon(&self) -> String {
         match self {
+            Self::Array(array) => array.to_canonical_toon(),
             Self::Bool(value) => value.to_string(),
             Self::Null => "null".to_owned(),
             Self::Number(value) => value.clone(),
@@ -108,6 +141,158 @@ impl Value {
             Self::Object(document) => Some(document),
             _ => None,
         }
+    }
+
+    pub fn as_array(&self) -> Option<&Array> {
+        match self {
+            Self::Array(array) => Some(array),
+            _ => None,
+        }
+    }
+}
+
+impl Array {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::List(values) => values.len(),
+            Self::Tabular(table) => table.rows.len(),
+        }
+    }
+
+    pub fn get(&self, index: usize) -> Option<Value> {
+        match self {
+            Self::List(values) => values.get(index).cloned(),
+            Self::Tabular(table) => table.get(index),
+        }
+    }
+
+    pub fn slice(&self, start: Option<usize>, end: Option<usize>) -> Self {
+        let len = self.len();
+        let start = start.unwrap_or(0).min(len);
+        let end = end.unwrap_or(len).min(len);
+        let (start, end) = if start > end {
+            (end, end)
+        } else {
+            (start, end)
+        };
+
+        match self {
+            Self::List(values) => Self::List(values[start..end].to_vec()),
+            Self::Tabular(table) => Self::Tabular(TabularArray {
+                fields: table.fields.clone(),
+                rows: table.rows[start..end].to_vec(),
+                delimiter: table.delimiter,
+            }),
+        }
+    }
+
+    pub fn values(&self) -> Vec<Value> {
+        (0..self.len())
+            .filter_map(|index| self.get(index))
+            .collect()
+    }
+
+    pub fn to_canonical_toon(&self) -> String {
+        let mut output = String::new();
+        self.write_canonical_toon(&mut output, None, 0);
+        output
+    }
+
+    fn write_canonical_toon(&self, output: &mut String, key: Option<&str>, depth: usize) {
+        self.write_body(output, key, depth);
+    }
+
+    fn write_body(&self, output: &mut String, key: Option<&str>, depth: usize) {
+        match self {
+            Self::List(values) if values.is_empty() => match key {
+                Some(key) => {
+                    output.push_str(key);
+                    output.push_str(": []\n");
+                }
+                None => output.push_str("[]\n"),
+            },
+            Self::List(values) if values.iter().all(is_inline_array_value) => {
+                write_array_header(output, key, values.len(), None);
+                output.push(' ');
+                for (index, value) in values.iter().enumerate() {
+                    if index > 0 {
+                        output.push(',');
+                    }
+                    output.push_str(&value.to_canonical_toon());
+                }
+                output.push('\n');
+            }
+            Self::List(values) => {
+                write_array_header(output, key, values.len(), None);
+                output.push('\n');
+                for value in values {
+                    output.push_str(&" ".repeat((depth + 1) * INDENT_WIDTH));
+                    match value {
+                        Value::Object(document) => {
+                            let Some(first) = document.fields.first() else {
+                                output.push_str("- null\n");
+                                continue;
+                            };
+                            output.push_str("- ");
+                            write_field(output, first, depth + 1);
+                            for field in document.fields.iter().skip(1) {
+                                output.push_str(&" ".repeat((depth + 2) * INDENT_WIDTH));
+                                write_field(output, field, depth + 2);
+                            }
+                        }
+                        value => {
+                            output.push_str("- ");
+                            output.push_str(&value.to_canonical_toon());
+                            output.push('\n');
+                        }
+                    }
+                }
+            }
+            Self::Tabular(table) => {
+                write_array_header(output, key, table.rows.len(), Some(&table.fields));
+                output.push('\n');
+                for row in &table.rows {
+                    output.push_str(&" ".repeat((depth + 1) * INDENT_WIDTH));
+                    output.push_str(&table.canonical_row(row));
+                    output.push('\n');
+                }
+            }
+        }
+    }
+}
+
+impl TabularArray {
+    fn get(&self, index: usize) -> Option<Value> {
+        self.rows
+            .get(index)
+            .map(|row| Value::Object(self.decode_row(row)))
+    }
+
+    fn decode_row(&self, row: &TabularRow) -> Document {
+        count_tabular_row_decode_for_tests();
+        let fields = self
+            .fields
+            .iter()
+            .zip(&row.values)
+            .map(|(key, raw_value)| Field {
+                key: key.clone(),
+                value: parse_scalar(raw_value, row.line)
+                    .unwrap_or_else(|_| Value::String(raw_value.clone())),
+            })
+            .collect();
+        Document { fields }
+    }
+
+    fn canonical_row(&self, row: &TabularRow) -> String {
+        row.values
+            .iter()
+            .map(|value| {
+                parse_scalar(value, row.line)
+                    .unwrap_or_else(|_| Value::String(value.clone()))
+                    .to_canonical_toon()
+            })
+            .collect::<Vec<_>>()
+            .join(&self.delimiter.to_string())
     }
 }
 
@@ -183,6 +368,24 @@ fn parse_object(
         }
 
         let value_text = raw_value.trim();
+        if let Some(header) = parse_array_header(key, line.number)? {
+            let value = parse_array_value(&header, value_text, lines, index, depth, line.number)?;
+            fields.push(Field {
+                key: header.key,
+                value,
+            });
+            continue;
+        }
+
+        if value_text == "[]" {
+            *index += 1;
+            fields.push(Field {
+                key: key.to_owned(),
+                value: Value::Array(Array::List(Vec::new())),
+            });
+            continue;
+        }
+
         if value_text.is_empty() {
             *index += 1;
             match lines.get(*index) {
@@ -228,6 +431,255 @@ fn parse_object(
     Ok(Document { fields })
 }
 
+fn parse_array_header(key: &str, line: usize) -> Result<Option<ArrayHeader>, ParseError> {
+    let Some(open) = key.find('[') else {
+        return Ok(None);
+    };
+    let Some(close) = key[open + 1..].find(']').map(|offset| open + 1 + offset) else {
+        return Err(ParseError {
+            line,
+            message: "invalid array header",
+        });
+    };
+
+    let name = &key[..open];
+    if name.is_empty() || name.contains(char::is_whitespace) {
+        return Err(ParseError {
+            line,
+            message: "expected non-empty field name",
+        });
+    }
+
+    let length_and_delimiter = &key[open + 1..close];
+    let digit_count = length_and_delimiter
+        .chars()
+        .take_while(|character| character.is_ascii_digit())
+        .count();
+    if digit_count == 0 {
+        return Err(ParseError {
+            line,
+            message: "invalid array header",
+        });
+    }
+    let len = length_and_delimiter[..digit_count]
+        .parse()
+        .map_err(|_| ParseError {
+            line,
+            message: "invalid array header",
+        })?;
+    let delimiter = match &length_and_delimiter[digit_count..] {
+        "" => ',',
+        text if text.chars().count() == 1 => text.chars().next().unwrap(),
+        _ => {
+            return Err(ParseError {
+                line,
+                message: "invalid array header",
+            });
+        }
+    };
+
+    let suffix = &key[close + 1..];
+    let fields = if suffix.is_empty() {
+        None
+    } else if suffix.starts_with('{') && suffix.ends_with('}') {
+        let names = split_delimited_values(&suffix[1..suffix.len() - 1], delimiter, line)?;
+        if names.iter().any(|name| name.is_empty()) {
+            return Err(ParseError {
+                line,
+                message: "invalid array header",
+            });
+        }
+        Some(names)
+    } else {
+        return Err(ParseError {
+            line,
+            message: "invalid array header",
+        });
+    };
+
+    Ok(Some(ArrayHeader {
+        key: name.to_owned(),
+        len,
+        delimiter,
+        fields,
+    }))
+}
+
+fn parse_array_value(
+    header: &ArrayHeader,
+    value_text: &str,
+    lines: &[Line<'_>],
+    index: &mut usize,
+    depth: usize,
+    line: usize,
+) -> Result<Value, ParseError> {
+    if let Some(fields) = &header.fields {
+        if !value_text.is_empty() {
+            return Err(ParseError {
+                line,
+                message: "expected tabular rows",
+            });
+        }
+        *index += 1;
+        return parse_tabular_array(fields, header, lines, index, depth + 1, line);
+    }
+
+    if !value_text.is_empty() {
+        let values = split_delimited_values(value_text, header.delimiter, line)?
+            .into_iter()
+            .map(|value| parse_scalar(&value, line))
+            .collect::<Result<Vec<_>, _>>()?;
+        if values.len() != header.len {
+            return Err(ParseError {
+                line,
+                message: "array length mismatch",
+            });
+        }
+        *index += 1;
+        return Ok(Value::Array(Array::List(values)));
+    }
+
+    *index += 1;
+    parse_expanded_list_array(header, lines, index, depth + 1, line)
+}
+
+fn parse_tabular_array(
+    fields: &[String],
+    header: &ArrayHeader,
+    lines: &[Line<'_>],
+    index: &mut usize,
+    row_depth: usize,
+    header_line: usize,
+) -> Result<Value, ParseError> {
+    let mut rows = Vec::new();
+
+    while rows.len() < header.len {
+        let Some(line) = lines.get(*index) else {
+            return Err(ParseError {
+                line: header_line,
+                message: "array length mismatch",
+            });
+        };
+        if line.depth < row_depth {
+            return Err(ParseError {
+                line: header_line,
+                message: "array length mismatch",
+            });
+        }
+        if line.depth != row_depth {
+            return Err(ParseError {
+                line: line.number,
+                message: "invalid indentation",
+            });
+        }
+
+        let values = split_delimited_values(line.content, header.delimiter, line.number)?;
+        if values.len() != fields.len() {
+            return Err(ParseError {
+                line: line.number,
+                message: "array row length mismatch",
+            });
+        }
+        rows.push(TabularRow {
+            line: line.number,
+            values,
+        });
+        *index += 1;
+    }
+
+    if let Some(line) = lines.get(*index) {
+        if line.depth >= row_depth {
+            return Err(ParseError {
+                line: line.number,
+                message: "array length mismatch",
+            });
+        }
+    }
+
+    Ok(Value::Array(Array::Tabular(TabularArray {
+        fields: fields.to_vec(),
+        rows,
+        delimiter: header.delimiter,
+    })))
+}
+
+fn parse_expanded_list_array(
+    header: &ArrayHeader,
+    lines: &[Line<'_>],
+    index: &mut usize,
+    item_depth: usize,
+    header_line: usize,
+) -> Result<Value, ParseError> {
+    let mut values = Vec::new();
+
+    while values.len() < header.len {
+        let Some(line) = lines.get(*index) else {
+            return Err(ParseError {
+                line: header_line,
+                message: "array length mismatch",
+            });
+        };
+        if line.depth < item_depth {
+            return Err(ParseError {
+                line: header_line,
+                message: "array length mismatch",
+            });
+        }
+        if line.depth != item_depth {
+            return Err(ParseError {
+                line: line.number,
+                message: "invalid indentation",
+            });
+        }
+        let Some(rest) = line.content.strip_prefix('-') else {
+            return Err(ParseError {
+                line: line.number,
+                message: "expected array item",
+            });
+        };
+        let value_text = rest.trim_start();
+        if value_text.contains(':') {
+            let mut nested_lines = vec![Line {
+                number: line.number,
+                depth: 0,
+                content: value_text,
+            }];
+            *index += 1;
+            while let Some(next_line) = lines.get(*index) {
+                if next_line.depth <= item_depth {
+                    break;
+                }
+                nested_lines.push(Line {
+                    number: next_line.number,
+                    depth: next_line.depth - item_depth - 1,
+                    content: next_line.content,
+                });
+                *index += 1;
+            }
+            let mut nested_index = 0;
+            values.push(Value::Object(parse_object(
+                &nested_lines,
+                &mut nested_index,
+                0,
+            )?));
+        } else {
+            values.push(parse_scalar(value_text, line.number)?);
+            *index += 1;
+        }
+    }
+
+    if let Some(line) = lines.get(*index) {
+        if line.depth >= item_depth {
+            return Err(ParseError {
+                line: line.number,
+                message: "array length mismatch",
+            });
+        }
+    }
+
+    Ok(Value::Array(Array::List(values)))
+}
+
 fn parse_scalar(value: &str, line: usize) -> Result<Value, ParseError> {
     if value.is_empty() {
         return Err(ParseError {
@@ -254,6 +706,112 @@ fn parse_scalar(value: &str, line: usize) -> Result<Value, ParseError> {
         value if is_number(value) => Value::Number(value.to_owned()),
         value => Value::String(value.to_owned()),
     })
+}
+
+fn split_delimited_values(
+    value: &str,
+    delimiter: char,
+    line: usize,
+) -> Result<Vec<String>, ParseError> {
+    if value.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut values = Vec::new();
+    let mut start = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for (index, character) in value.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
+        match character {
+            '\\' if in_string => escaped = true,
+            '"' => in_string = !in_string,
+            character if character == delimiter && !in_string => {
+                values.push(value[start..index].trim().to_owned());
+                start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+
+    if in_string || escaped {
+        return Err(ParseError {
+            line,
+            message: "invalid quoted string",
+        });
+    }
+
+    values.push(value[start..].trim().to_owned());
+    Ok(values)
+}
+
+fn write_array_header(
+    output: &mut String,
+    key: Option<&str>,
+    len: usize,
+    fields: Option<&[String]>,
+) {
+    if let Some(key) = key {
+        output.push_str(key);
+    }
+    output.push('[');
+    output.push_str(&len.to_string());
+    output.push(']');
+    if let Some(fields) = fields {
+        output.push('{');
+        output.push_str(&fields.join(","));
+        output.push('}');
+    }
+    output.push(':');
+}
+
+fn write_field(output: &mut String, field: &Field, depth: usize) {
+    match &field.value {
+        Value::Array(array) => {
+            array.write_canonical_toon(output, Some(&field.key), depth);
+        }
+        Value::Object(document) => {
+            output.push_str(&field.key);
+            output.push_str(":\n");
+            document.write_canonical_toon(output, depth + 1);
+        }
+        value => {
+            output.push_str(&field.key);
+            output.push_str(": ");
+            output.push_str(&value.to_canonical_toon());
+            output.push('\n');
+        }
+    }
+}
+
+fn is_inline_array_value(value: &Value) -> bool {
+    !matches!(value, Value::Array(_) | Value::Object(_))
+}
+
+#[cfg(test)]
+static TABULAR_ROW_DECODE_COUNT: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+fn count_tabular_row_decode_for_tests() {
+    #[cfg(test)]
+    {
+        TABULAR_ROW_DECODE_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+fn reset_tabular_row_decode_count_for_tests() {
+    TABULAR_ROW_DECODE_COUNT.store(0, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(test)]
+fn tabular_row_decode_count_for_tests() -> usize {
+    TABULAR_ROW_DECODE_COUNT.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 fn parse_quoted_string(value: &str, line: usize) -> Result<String, ParseError> {
@@ -444,5 +1002,45 @@ mod tests {
 
         assert_eq!(error.line(), 2);
         assert_eq!(error.message(), "invalid indentation");
+    }
+
+    #[test]
+    fn parses_inline_list_arrays_and_serializes_canonical_toon() {
+        let document = Document::parse("tags[3]: admin,ops,dev\n").unwrap();
+
+        assert_eq!(document.to_canonical_toon(), "tags[3]: admin,ops,dev\n");
+    }
+
+    #[test]
+    fn parses_tabular_arrays_and_serializes_canonical_toon() {
+        let document =
+            Document::parse("users[2]{id,name,active}:\n  1,Ada,true\n  2,\"Bob Smith\",false\n")
+                .unwrap();
+
+        assert_eq!(
+            document.to_canonical_toon(),
+            "users[2]{id,name,active}:\n  1,Ada,true\n  2,\"Bob Smith\",false\n"
+        );
+    }
+
+    #[test]
+    fn rejects_array_length_mismatches() {
+        let error = Document::parse("tags[2]: admin,ops,dev\n").unwrap_err();
+
+        assert_eq!(error.line(), 1);
+        assert_eq!(error.message(), "array length mismatch");
+    }
+
+    #[test]
+    fn decodes_only_touched_tabular_rows() {
+        let document =
+            Document::parse("users[3]{id,name}:\n  1,Ada\n  2,Bob\n  3,Chloe\n").unwrap();
+        let users = document.get("users").and_then(Value::as_array).unwrap();
+
+        super::reset_tabular_row_decode_count_for_tests();
+        let row = users.get(1).unwrap();
+
+        assert_eq!(row.to_canonical_toon(), "id: 2\nname: Bob\n");
+        assert_eq!(super::tabular_row_decode_count_for_tests(), 1);
     }
 }
