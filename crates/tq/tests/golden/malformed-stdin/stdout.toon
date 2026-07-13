@@ -1,0 +1,2 @@
+*** Add File: crates/tq/tests/golden/malformed-stdin/stderr.txt
+error: line 1: expected `key: value`
