@@ -1,0 +1,9 @@
+users[3]{name,score,team}:
+  Ada,41,research
+  Bob,7,ops
+  Cid,19,research
+tags[4]: ops,core,ops,dev
+meta:
+  team: core
+  level: 2
+phrase: Ada-Lovelace
