@@ -1,0 +1,1 @@
+-o json -c {groups:(.users|group_by(.team)|map({team:.[0].team,total:(map(.score)|add),names:(map(.name)|join(","))})),entries:(.meta|to_entries|from_entries),words:(.phrase|split("-")),has_ada:(.phrase|test("^Ada")),unique_tags:(.tags|unique),first:(.users|min_by(.score)|.name),last:(.users|max_by(.score)|.name)}
