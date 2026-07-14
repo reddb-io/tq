@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="1200" height="420" role="img" aria-labelledby="tq-hero-title tq-hero-desc">
-  <title id="tq-hero-title">tq — jq for TOON</title>
-  <desc id="tq-hero-desc">tq: query, convert, and shape TOON and JSON from the command line.</desc>
+  <title id="tq-hero-title">tq — jq for TOON &amp; TOONL</title>
+  <desc id="tq-hero-desc">tq: query, convert, and stream TOON, TOONL and JSON from the command line.</desc>
 
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
@@ -36,8 +36,8 @@
 
       <rect x="74" y="206" width="132" height="3" fill="url(#rule)"/>
 
-      <text x="72" y="258" font-size="30" font-weight="600" fill="#ff2056">jq for TOON</text>
-      <text x="72" y="300" font-size="21" fill="#8b949e">Query, convert, and shape TOON &#8596; JSON.</text>
+      <text x="72" y="258" font-size="30" font-weight="600" fill="#ff2056">jq for TOON &amp; TOONL</text>
+      <text x="72" y="300" font-size="21" fill="#8b949e">Query, convert, and stream TOON &#8596; JSON.</text>
 
       <g font-size="14" fill="#6e7681">
         <rect x="72" y="326" width="120" height="28" rx="14" fill="#ffffff" fill-opacity="0.04" stroke="#ffffff" stroke-opacity="0.08"/>
