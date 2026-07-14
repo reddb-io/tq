@@ -1,0 +1,142 @@
+{
+  "version": "toonl-v0.1",
+  "extension": ".toonl",
+  "mediaHint": "application/toonl",
+  "tests": [
+    {
+      "name": "decode/comma-segment-with-trailer",
+      "kind": "decode",
+      "input": "[]{ts,level,msg}:\n\"2026-07-14T03:00:00Z\",info,boot\n\"2026-07-14T03:00:02Z\",error,\"disk full\"\n[=2]\n",
+      "segments": [
+        {
+          "delimiter": ",",
+          "fields": ["ts", "level", "msg"],
+          "rows": [
+            ["\"2026-07-14T03:00:00Z\"", "info", "boot"],
+            ["\"2026-07-14T03:00:02Z\"", "error", "\"disk full\""]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "decode/blank-lines-and-pipe-segment",
+      "kind": "decode",
+      "input": "\n[|]{id|name}:\n1|Ada\n\n2|Linus\n[=2]\n",
+      "segments": [
+        {
+          "delimiter": "|",
+          "fields": ["id", "name"],
+          "rows": [
+            ["1", "Ada"],
+            ["2", "Linus"]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "decode/header-rotation-without-previous-trailer",
+      "kind": "decode",
+      "input": "[]{id,name}:\n1,Ada\n[]{id,name,role}:\n2,Linus,dev\n[=1]\n",
+      "segments": [
+        {
+          "delimiter": ",",
+          "fields": ["id", "name"],
+          "rows": [["1", "Ada"]]
+        },
+        {
+          "delimiter": ",",
+          "fields": ["id", "name", "role"],
+          "rows": [["2", "Linus", "dev"]]
+        }
+      ]
+    },
+    {
+      "name": "decode/tab-delimited-segment",
+      "kind": "decode",
+      "input": "[\t]{id\tmsg}:\n1\thello\n[=1]\n",
+      "segments": [
+        {
+          "delimiter": "\t",
+          "fields": ["id", "msg"],
+          "rows": [["1", "hello"]]
+        }
+      ]
+    },
+    {
+      "name": "encode/comma-segment-with-clean-eof-trailer",
+      "kind": "encode",
+      "delimiter": ",",
+      "fields": ["id", "name"],
+      "rows": [
+        ["1", "Ada"],
+        ["2", "Linus"]
+      ],
+      "expected": "[]{id,name}:\n1,Ada\n2,Linus\n[=2]\n"
+    },
+    {
+      "name": "encode/nested-value-escape-hatch-cell",
+      "kind": "encode",
+      "delimiter": ",",
+      "fields": ["id", "payload"],
+      "rows": [
+        ["1", "\"{\\\"ok\\\":true}\""]
+      ],
+      "expected": "[]{id,payload}:\n1,\"{\\\"ok\\\":true}\"\n[=1]\n"
+    },
+    {
+      "name": "close-transform/single-segment-to-one-toon-document",
+      "kind": "close-transform",
+      "input": "[]{ts,level,msg}:\n\"2026-07-14T03:00:00Z\",info,boot\n\"2026-07-14T03:00:02Z\",error,\"disk full\"\n[=2]\n",
+      "expectedToonDocuments": [
+        "[2]{ts,level,msg}:\n  \"2026-07-14T03:00:00Z\",info,boot\n  \"2026-07-14T03:00:02Z\",error,\"disk full\"\n"
+      ]
+    },
+    {
+      "name": "close-transform/multi-segment-to-document-sequence",
+      "kind": "close-transform",
+      "input": "[]{ts,level,msg}:\n\"2026-07-14T03:00:00Z\",info,boot\n[=1]\n[]{ts,level,msg,request_id}:\n\"2026-07-14T03:01:00Z\",info,retry,null\n[=1]\n",
+      "expectedToonDocuments": [
+        "[1]{ts,level,msg}:\n  \"2026-07-14T03:00:00Z\",info,boot\n",
+        "[1]{ts,level,msg,request_id}:\n  \"2026-07-14T03:01:00Z\",info,retry,null\n"
+      ]
+    },
+    {
+      "name": "close-transform/pipe-segment-preserves-delimiter",
+      "kind": "close-transform",
+      "input": "[|]{id|name}:\n1|Ada\n2|Linus\n[=2]\n",
+      "expectedToonDocuments": [
+        "[2|]{id|name}:\n  1|Ada\n  2|Linus\n"
+      ]
+    },
+    {
+      "name": "error/reserved-list-line-prefix",
+      "kind": "error",
+      "input": "[]{id,name}:\n- 1,Ada\n",
+      "expectedError": "reserved line prefix"
+    },
+    {
+      "name": "error/row-arity-mismatch",
+      "kind": "error",
+      "input": "[]{id,name}:\n1,Ada,extra\n",
+      "expectedError": "row arity mismatch"
+    },
+    {
+      "name": "error/trailer-count-mismatch",
+      "kind": "error",
+      "input": "[]{id,name}:\n1,Ada\n[=2]\n",
+      "expectedError": "trailer count mismatch"
+    },
+    {
+      "name": "error/misparse-footgun-bare-field-list-header",
+      "kind": "error",
+      "input": "{id,name}:\n1,Ada\n",
+      "expectedError": "row before header"
+    },
+    {
+      "name": "error/misparse-footgun-single-bare-row",
+      "kind": "error",
+      "input": "1,Ada\n",
+      "expectedError": "row before header"
+    }
+  ]
+}
