@@ -303,8 +303,10 @@ jobs:
             echo "range=${PREVIOUS_TAG}..${TARGET_REF}" >> "$GITHUB_OUTPUT"
             echo "Release changelog range: ${PREVIOUS_TAG}..${TARGET_REF}"
           else
-            echo "range=${TARGET_REF}" >> "$GITHUB_OUTPUT"
-            echo "Release changelog range: ${TARGET_REF}"
+            # First release: no previous stable tag, so no range argument —
+            # git-cliff rejects a bare ref and should walk the full history.
+            echo "range=" >> "$GITHUB_OUTPUT"
+            echo "Release changelog range: full history"
           fi
 
       - name: Generate changelog from commits
