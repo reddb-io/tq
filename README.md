@@ -287,11 +287,63 @@ $ tq -o json -c '.deploys[0]' deploys.toon
 
 | Flag | Meaning |
 | --- | --- |
-| `-p toon\|json` | Input format (default: `toon`) |
-| `-o toon\|json` | Output format (default: same as `-p`) |
+| `-p toon\|json\|toonl` | Input format (default: `toon`; a named `*.toonl` file auto-selects `toonl`) |
+| `-o toon\|json\|toonl` | Output format (default: same as `-p`) |
+| `-s`, `--slurp` | TOONL only: materialize the whole stream as one array (for `sort_by`, `group_by`, …) |
 | `-r` | Raw output: emit strings unquoted, without JSON escaping |
 | `-c` | Compact JSON output (one line, no spaces) |
 | `-V`, `--version` | Print the version |
+
+---
+
+## TOONL — append-only streams
+
+**TOONL is to TOON what JSONL is to JSON**: one record per line, header once, append forever — a log you can `>>` into and `tail -f` out of. It is a reddb-io extension ([normative spec](docs/toonl-v0.1.md)) with a guaranteed bridge back to standard TOON: every *closed* stream converts to a valid TOON v3.3 document in one O(n) pass.
+
+```toonl
+[]{ts,level,msg}:
+2026-07-14T03:00:00Z,info,boot
+2026-07-14T03:00:02Z,error,"disk full"
+[=2]
+```
+
+The `[]{…}:` header opens a segment, each line is one row, and the optional `[=N]` trailer makes a finished stream verifiable — an open stream is simply a stream that hasn't ended yet. A new header mid-stream rotates the schema.
+
+`tq` processes TOONL **record by record in constant memory** — each row becomes one input, jq-style, and stdin never has to end:
+
+```console
+$ tail -f app.toonl | tq -p toonl -o json -c 'select(.level == "error") | .msg'
+"disk full"
+```
+
+Aggregations that need the whole stream take an explicit `-s` (slurp), exactly like jq — O(n) memory is your call, never a surprise:
+
+```console
+$ tq -p toonl -s -o json -c 'sort_by(.score) | map(.id)' scores.toonl
+[1,3,2]
+```
+
+And `-o toonl` writes streams: header emitted on the first record, automatic rotation when the shape changes, trailer on clean EOF:
+
+```console
+$ printf '{"users":[{"id":1,"name":"Ada"},{"id":2,"name":"Bob"}]}' | tq -p json -o toonl '.users[]'
+[]{id,name}:
+1,Ada
+2,Bob
+[=2]
+```
+
+### Why bother? Tokens.
+
+Same payloads, tokenized with `o200k_base` at 10,000 rows ([full benchmark](.red/researches/token-benchmark-toonl-vs-jsonl.md), reproducible via `scripts/research_token_benchmark.py`):
+
+| Payload class | JSONL tokens | TOONL tokens | Saving |
+| --- | ---: | ---: | ---: |
+| Analytics export | 535,576 | 305,604 | **−42.9%** |
+| Flat log | 552,500 | 360,024 | **−34.8%** |
+| Envelope (opaque payload cell) | 990,000 | 906,686 | −8.4% |
+
+The saving grows with stream length (the header amortizes) and open TOONL even beats closed TOON by a point or two — there is no `[N]` to pay.
 
 ---
 
