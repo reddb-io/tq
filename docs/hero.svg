@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="1200" height="420" role="img" aria-labelledby="tq-hero-title tq-hero-desc">
+  <title id="tq-hero-title">tq — jq for TOON</title>
+  <desc id="tq-hero-desc">tq: query, convert, and shape TOON and JSON from the command line.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#07090d"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ff2056" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#ff2056" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff2056"/>
+      <stop offset="1" stop-color="#ff2056" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M24 0H0V24" fill="none" stroke="#ffffff" stroke-opacity="0.028" stroke-width="1"/>
+    </pattern>
+    <clipPath id="frame">
+      <rect x="0" y="0" width="1200" height="420" rx="18"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="1200" height="420" fill="url(#bg)"/>
+    <rect width="1200" height="420" fill="url(#grid)"/>
+    <ellipse cx="120" cy="60" rx="420" ry="300" fill="url(#glow)"/>
+    <ellipse cx="1120" cy="410" rx="360" ry="240" fill="url(#glow)" opacity="0.5"/>
+
+    <!-- left: wordmark + pitch -->
+    <g font-family="ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace">
+      <text x="72" y="176" font-size="132" font-weight="700" fill="#f0f6fc" letter-spacing="-4">tq</text>
+      <rect x="216" y="120" width="26" height="58" fill="#ff2056"/>
+
+      <rect x="74" y="206" width="132" height="3" fill="url(#rule)"/>
+
+      <text x="72" y="258" font-size="30" font-weight="600" fill="#ff2056">jq for TOON</text>
+      <text x="72" y="300" font-size="21" fill="#8b949e">Query, convert, and shape TOON &#8596; JSON.</text>
+
+      <g font-size="14" fill="#6e7681">
+        <rect x="72" y="326" width="120" height="28" rx="14" fill="#ffffff" fill-opacity="0.04" stroke="#ffffff" stroke-opacity="0.08"/>
+        <text x="88" y="345">single binary</text>
+        <rect x="202" y="326" width="104" height="28" rx="14" fill="#ffffff" fill-opacity="0.04" stroke="#ffffff" stroke-opacity="0.08"/>
+        <text x="218" y="345">zero deps</text>
+        <rect x="316" y="326" width="150" height="28" rx="14" fill="#ffffff" fill-opacity="0.04" stroke="#ffffff" stroke-opacity="0.08"/>
+        <text x="332" y="345">100% spec corpus</text>
+      </g>
+    </g>
+
+    <!-- right: JSON in, TOON out -->
+    <g font-family="ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace" font-size="15">
+      <rect x="596" y="56" width="248" height="308" rx="12" fill="#0b0f15" stroke="#ffffff" stroke-opacity="0.09"/>
+      <text x="616" y="86" font-size="12" fill="#6e7681" letter-spacing="1">JSON &#183; 85 tokens</text>
+      <g fill="#8b949e">
+        <text x="616" y="120">{</text>
+        <text x="630" y="144"><tspan fill="#79c0ff">"users"</tspan>: [</text>
+        <text x="646" y="168">{</text>
+        <text x="662" y="192"><tspan fill="#79c0ff">"id"</tspan>: <tspan fill="#f0f6fc">1</tspan>,</text>
+        <text x="662" y="216"><tspan fill="#79c0ff">"name"</tspan>: <tspan fill="#a5d6ff">"Ada"</tspan>,</text>
+        <text x="662" y="240"><tspan fill="#79c0ff">"role"</tspan>: <tspan fill="#a5d6ff">"admin"</tspan></text>
+        <text x="646" y="264">},</text>
+        <text x="646" y="288">{ &#8230; },</text>
+        <text x="646" y="312">{ &#8230; }</text>
+        <text x="630" y="336">]</text>
+        <text x="616" y="356">}</text>
+      </g>
+
+      <!-- pipe -->
+      <g transform="translate(844 210)">
+        <line x1="12" y1="0" x2="60" y2="0" stroke="#ff2056" stroke-width="2" stroke-opacity="0.55"/>
+        <path d="M60 -6 L74 0 L60 6 Z" fill="#ff2056"/>
+        <rect x="6" y="-46" width="72" height="26" rx="13" fill="#ff2056" fill-opacity="0.14" stroke="#ff2056" stroke-opacity="0.5"/>
+        <text x="20" y="-28" font-size="13" fill="#ff2056">tq -o toon</text>
+      </g>
+
+      <rect x="932" y="56" width="212" height="308" rx="12" fill="#0b0f15" stroke="#ff2056" stroke-opacity="0.35"/>
+      <text x="952" y="86" font-size="12" fill="#ff2056" letter-spacing="1">TOON &#183; 35 tokens</text>
+      <g fill="#8b949e">
+        <text x="952" y="120"><tspan fill="#f0f6fc">users</tspan><tspan fill="#ff2056">[3]</tspan>{id,name,</text>
+        <text x="952" y="144">role}:</text>
+        <text x="968" y="176" fill="#c9d1d9">1,Ada,admin</text>
+        <text x="968" y="200" fill="#c9d1d9">2,Linus,dev</text>
+        <text x="968" y="224" fill="#c9d1d9">3,Grace,ops</text>
+      </g>
+      <line x1="952" y1="252" x2="1124" y2="252" stroke="#ffffff" stroke-opacity="0.08"/>
+      <text x="952" y="282" font-size="13" fill="#6e7681">same data</text>
+      <text x="952" y="306" font-size="13" fill="#6e7681">same query language</text>
+      <text x="952" y="330" font-size="13" fill="#3fb950">59% fewer tokens</text>
+    </g>
+
+    <rect x="0" y="416" width="1200" height="4" fill="#ff2056"/>
+  </g>
+</svg>
