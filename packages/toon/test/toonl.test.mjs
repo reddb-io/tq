@@ -1,16 +1,27 @@
 import assert from 'node:assert/strict'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import {
+  JsonlToToonl,
+  ToonlDecodeStream,
+  ToonlEncodeStream,
+  ToonlToJsonl,
   ToonlEncoder,
   ToonlError,
   closeTransform,
   decodeLines,
   encodeLines,
   encodeRecords,
+  jsonToToon,
   parseRecords,
   parseStream,
+  recordTransform,
+  toonToJson,
 } from '../src/index.js'
+import { readToonlFile, writeToonlFile } from '../src/node.js'
 
 async function collect(source) {
   const records = []
@@ -18,6 +29,25 @@ async function collect(source) {
     records.push(record)
   }
   return records
+}
+
+async function readableText(readable) {
+  let output = ''
+  for await (const chunk of readable) {
+    output += chunk
+  }
+  return output
+}
+
+function streamOf(chunks) {
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(chunk)
+      }
+      controller.close()
+    },
+  })
 }
 
 test('decodeLines yields one record per row, following schema rotation', async () => {
@@ -139,4 +169,76 @@ test('closeTransform emits one canonical TOON document per segment', () => {
     '[1]{id,name}:\n  1,Ada\n',
     '[1|]{id|name}:\n  2|Linus\n',
   ])
+})
+
+test('Web Streams decode and encode TOONL records with schema rotation', async () => {
+  const chunks = new ReadableStream({
+    start(controller) {
+      controller.enqueue('[]{id,na')
+      controller.enqueue(new TextEncoder().encode('me}:\n1,Ada\n[=1]\n[]{id,name,role}:\n'))
+      controller.enqueue('2,Linus,dev\n[=1]\n')
+      controller.close()
+    },
+  })
+
+  const encoded = chunks
+    .pipeThrough(ToonlDecodeStream())
+    .pipeThrough(
+      recordTransform((record) => {
+        if (record.id === 1) {
+          return undefined
+        }
+        return { id: record.id, name: record.name, role: record.role }
+      }),
+    )
+
+  assert.equal(await readableText(encoded), '[]{id,name,role}:\n2,Linus,dev\n[=1]\n')
+})
+
+test('JsonlToToonl and ToonlToJsonl bridge line streams in constant memory', async () => {
+  const jsonl = ['{"id":1,"name":"Ada"}\n{"id":2,"name":"Linus","role":"dev"}\n']
+  const toonl = await readableText(
+    streamOf(jsonl).pipeThrough(JsonlToToonl()).pipeThrough(ToonlDecodeStream()).pipeThrough(ToonlEncodeStream()),
+  )
+
+  assert.equal(toonl, '[]{id,name}:\n1,Ada\n[=1]\n[]{id,name,role}:\n2,Linus,dev\n[=1]\n')
+  assert.equal(
+    await readableText(streamOf([toonl]).pipeThrough(ToonlToJsonl())),
+    '{"id":1,"name":"Ada"}\n{"id":2,"name":"Linus","role":"dev"}\n',
+  )
+})
+
+test('document bridge helpers convert whole JSON and TOON documents', () => {
+  const toon = jsonToToon('{"users":[{"id":1,"name":"Ada"}]}')
+
+  assert.equal(toon, 'users[1]{id,name}:\n  1,Ada\n')
+  assert.equal(toonToJson(toon), '{"users":[{"id":1,"name":"Ada"}]}')
+})
+
+test('node subpath reads and writes TOONL files as record streams', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'toon-node-'))
+  const path = join(directory, 'records.toonl')
+
+  try {
+    await writeToonlFile(path, [
+      { id: 1, name: 'Ada' },
+      { id: 2, name: 'Linus', role: 'dev' },
+    ])
+
+    assert.equal(
+      readFileSync(path, 'utf8'),
+      '[]{id,name}:\n1,Ada\n[=1]\n[]{id,name,role}:\n2,Linus,dev\n[=1]\n',
+    )
+
+    const records = []
+    for await (const record of readToonlFile(path)) {
+      records.push(record)
+    }
+    assert.deepEqual(records, [
+      { id: 1, name: 'Ada' },
+      { id: 2, name: 'Linus', role: 'dev' },
+    ])
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 })
