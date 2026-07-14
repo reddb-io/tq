@@ -8,12 +8,17 @@
     ".": {
       "import": "./src/index.js",
       "types": "./index.d.ts"
+    },
+    "./node": {
+      "import": "./src/node.js",
+      "types": "./node.d.ts"
     }
   },
   "types": "./index.d.ts",
   "files": [
     "src/",
     "index.d.ts",
+    "node.d.ts",
     "README.md",
     "LICENSE"
   ],
