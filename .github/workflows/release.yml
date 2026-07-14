@@ -274,6 +274,11 @@ jobs:
           cat release/checksums.txt
 
       - name: Attest release artifacts
+        # GitHub only persists attestations for public repos (or paid org
+        # plans); on a private repo the API refuses. Non-blocking so a
+        # private tq still releases — attestations kick in automatically
+        # the moment the repo goes public.
+        continue-on-error: true
         uses: actions/attest-build-provenance@v2
         with:
           subject-checksums: release/SHA256SUMS
