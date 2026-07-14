@@ -464,6 +464,8 @@ users[3]{id,name,role}:
 
 `Value::from_json_str` / `Value::from_json_value` come in from the JSON side, `to_canonical_toon` and `to_json_string(compact)` go out, and `Document::parse` / `parse_with_options` give you the object model with the spec's decoder options.
 
+For TOONL, the crate exposes streaming APIs directly: `ToonlReader<R: BufRead>` iterates records in constant memory, `ToonlWriter<W: Write>` writes lazy headers with automatic schema rotation, and the bridge functions `jsonl_to_toonl`, `toonl_to_jsonl`, and `close_transform_stream` wire the common conversions without going through the CLI.
+
 ---
 
 ## JS/TS library
@@ -499,10 +501,10 @@ users[3]{id,name,role}:
 
 `parse(input, options)` takes the spec's decoder options (`indent`, `strict`, `expandPaths`), `parseDocument` insists on an object root, and `serialize` writes the canonical default profile.
 
-TOONL is the streaming half: `encodeLines` emits an append-only stream, `decodeLines` reads it back a record at a time, and `closeTransform` turns each segment into one length-bearing TOON document.
+TOONL is the streaming half: `encodeLines` emits an append-only stream, `decodeLines` reads it back a record at a time, and `closeTransform` turns each segment into one length-bearing TOON document. The Web Streams API surface (`ToonlDecodeStream`, `ToonlEncodeStream`, `JsonlToToonl`, `ToonlToJsonl`, and `recordTransform`) is universal across Node, Bun, Deno and browsers; in Node, use `Readable.toWeb()` / `Readable.fromWeb()` when crossing between Node streams and Web streams. The optional `@reddb-io/toon/node` subpath adds `readToonlFile(path)` and `writeToonlFile(path, records)` using only `node:fs` and `node:stream`.
 
 ```js
-import { closeTransform, decodeLines, encodeLines } from '@reddb-io/toon'
+import { JsonlToToonl, ToonlToJsonl, closeTransform, decodeLines, encodeLines } from '@reddb-io/toon'
 
 // The header is written lazily with the first record, and a schema change
 // rotates the segment automatically.
@@ -520,6 +522,18 @@ for await (const record of decodeLines(stream)) {
 
 // Close the stream: each segment becomes one canonical TOON document.
 process.stdout.write(closeTransform(stream)[0])
+
+const jsonl = new ReadableStream({
+  start(controller) {
+    controller.enqueue('{"id":1,"name":"Ada"}\n')
+    controller.close()
+  }
+})
+const toonl = jsonl.pipeThrough(JsonlToToonl())
+const backToJsonl = toonl.pipeThrough(ToonlToJsonl())
+for await (const line of backToJsonl) {
+  process.stdout.write(line)
+}
 ```
 
 ```console
@@ -532,6 +546,7 @@ error: disk full
 [2]{ts,level,msg}:
   "2026-07-14T03:00:00Z",info,boot
   "2026-07-14T03:00:02Z",error,disk full
+{"id":1,"name":"Ada"}
 ```
 
 `decodeLines` also accepts an async iterable of chunks, so a socket or a file stream flows straight through it.
