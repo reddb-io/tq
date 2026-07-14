@@ -448,3 +448,56 @@ jobs:
           # it published to be visible in the index.
           publish_one reddb-io-toon
           publish_one reddb-io-tq
+
+  publish-npm:
+    name: Publish @reddb-io/toon to npm
+    # Like publish-cargo, this is a source publish: it needs nothing from the
+    # binary build matrix, so it runs in parallel with everything else. npm
+    # publishing follows the reddb pattern: stable tags only — main-push
+    # prereleases ship binaries on the GitHub Release but never hit npm.
+    needs: [plan]
+    runs-on: ubuntu-latest
+    if: |
+      needs.plan.outputs.should_skip != 'true' &&
+      needs.plan.outputs.release_channel == 'stable'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Sync release version
+        run: bash scripts/sync-version.sh "${{ needs.plan.outputs.package_version }}"
+      - name: Install
+        run: pnpm install --no-frozen-lockfile
+      - name: Test
+        run: pnpm -r test
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          CHANNEL: ${{ needs.plan.outputs.release_channel }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${NPM_TOKEN}" ]]; then
+            echo "::warning::NPM_TOKEN secret not set — skipping. Add an npm automation token as NPM_TOKEN in repo secrets."
+            exit 0
+          fi
+
+          # A prerelease must never move the `latest` dist-tag, so it goes out
+          # under `next` — the same channel name the installer uses.
+          TAG=latest
+          [[ "${CHANNEL}" == "next" ]] && TAG=next
+
+          out=$(pnpm publish --filter @reddb-io/toon --access public --tag "${TAG}" --no-git-checks 2>&1) \
+            && { echo "$out"; exit 0; }
+          if echo "$out" | grep -qE "cannot publish over|previously published|already exists"; then
+            echo "  @reddb-io/toon@${{ needs.plan.outputs.package_version }} already on npm — skipping"
+          else
+            echo "$out" >&2
+            exit 1
+          fi
