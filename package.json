@@ -1,0 +1,19 @@
+{
+  "name": "tq-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "pnpm workspace for the JS packages published from the tq repo (@reddb-io/toon).",
+  "packageManager": "pnpm@11.6.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "pnpm -r test",
+    "lint": "pnpm -r --if-present lint"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/reddb-io/tq.git"
+  }
+}
