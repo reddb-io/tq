@@ -413,6 +413,8 @@ The saving grows with stream length (the header amortizes) and open TOONL even b
 
 ## Using the library
 
+### Rust — `reddb-io-toon`
+
 The `reddb-io-toon` crate is the parser, serializer and lazy document model that `tq` is built on; you can use it directly.
 
 ```toml
@@ -459,14 +461,84 @@ users[3]{id,name,role}:
 
 `Value::from_json_str` / `Value::from_json_value` come in from the JSON side, `to_canonical_toon` and `to_json_string(compact)` go out, and `Document::parse` / `parse_with_options` give you the object model with the spec's decoder options.
 
+### JavaScript / TypeScript — `@reddb-io/toon`
+
+The same format, in dependency-free ESM. It decodes to (and encodes from) plain JSON values, ships hand-written types, and runs the **same official spec corpus** as the Rust crate — all 389 fixtures, no exceptions.
+
+```bash
+pnpm add @reddb-io/toon
+```
+
+```js
+import { parse, serialize } from '@reddb-io/toon'
+
+const document = parse('users[3]{id,name,role}:\n  1,Ada,admin\n  2,Linus,dev\n  3,Grace,ops\n')
+
+console.log(`${document.users.length} users`)
+console.log(`first: ${document.users[0].name}`)
+
+// Canonical TOON round-trip, and JSON on the way out.
+process.stdout.write(serialize(document))
+console.log(JSON.stringify(document))
+```
+
+```console
+3 users
+first: Ada
+users[3]{id,name,role}:
+  1,Ada,admin
+  2,Linus,dev
+  3,Grace,ops
+{"users":[{"id":1,"name":"Ada","role":"admin"},{"id":2,"name":"Linus","role":"dev"},{"id":3,"name":"Grace","role":"ops"}]}
+```
+
+`parse(input, options)` takes the spec's decoder options (`indent`, `strict`, `expandPaths`), `parseDocument` insists on an object root, and `serialize` writes the canonical default profile.
+
+TOONL is the streaming half: `encodeLines` emits an append-only stream, `decodeLines` reads it back a record at a time, and `closeTransform` turns each segment into one length-bearing TOON document.
+
+```js
+import { closeTransform, decodeLines, encodeLines } from '@reddb-io/toon'
+
+// The header is written lazily with the first record, and a schema change
+// rotates the segment automatically.
+const emitter = encodeLines()
+let stream = ''
+stream += emitter.push({ ts: '2026-07-14T03:00:00Z', level: 'info', msg: 'boot' })
+stream += emitter.push({ ts: '2026-07-14T03:00:02Z', level: 'error', msg: 'disk full' })
+stream += emitter.end()
+process.stdout.write(stream)
+
+// Read it back one record at a time — the stream never has to fit in memory.
+for await (const record of decodeLines(stream)) {
+  console.log(`${record.level}: ${record.msg}`)
+}
+
+// Close the stream: each segment becomes one canonical TOON document.
+process.stdout.write(closeTransform(stream)[0])
+```
+
+```console
+[]{ts,level,msg}:
+"2026-07-14T03:00:00Z",info,boot
+"2026-07-14T03:00:02Z",error,disk full
+[=2]
+info: boot
+error: disk full
+[2]{ts,level,msg}:
+  "2026-07-14T03:00:00Z",info,boot
+  "2026-07-14T03:00:02Z",error,disk full
+```
+
+`decodeLines` also accepts an async iterable of chunks, so a socket or a file stream flows straight through it. Every example above is executed as a test on each CI run ([`packages/toon/test/readme-examples.test.mjs`](packages/toon/test/readme-examples.test.mjs)), so the docs cannot drift from the API.
+
 ---
 
 ## Release channels
 
 | Channel | Trigger | Version | GitHub release |
 | --- | --- | --- | --- |
-| **stable** | pushing a `v*.*.*` tag | the tag, e.g. `0.1.0` | normal release; publishes both crates to crates.io in lockstep |
-| **next** | every push to `main` | `<base>-next.<run>`, e.g. `0.1.0-next.42` | prerelease |
+| **stable** | pushing a `v*.*.*` tag | the tag, e.g. `0.1.0` | normal release; publishes both crates to crates.io and `@reddb-io/toon` to npm, in lockstep |
+| **next** | every push to `main` | `<base>-next.<run>`, e.g. `0.1.0-next.42` | prerelease; `@reddb-io/toon` goes out under the `next` npm tag |
 
 Both channels build the same seven-asset matrix with checksums and attestations. The installer follows `stable` by default; opt into the bleeding edge, or pin an exact build, with:
 
@@ -490,9 +562,13 @@ cargo run -p reddb-io-tq -- . deploys.toon
 cargo fmt --check
 cargo clippy --workspace -- -D warnings
 cargo llvm-cov --workspace --fail-under-lines 95
+
+corepack enable                      # the JS side; always pnpm, never npm/yarn
+pnpm install
+pnpm -r test                         # conformance, TOONL and README-example tests
 ```
 
-The workspace is two crates: `crates/toon` (`reddb-io-toon` — the format) and `crates/tq` (`reddb-io-tq` — the `tq` binary).
+The Rust workspace is two crates: `crates/toon` (`reddb-io-toon` — the format) and `crates/tq` (`reddb-io-tq` — the `tq` binary). The pnpm workspace is one package: `packages/toon` (`@reddb-io/toon` — the same format in JS). Both run the same official spec corpus, and `scripts/sync-version.sh` keeps all three at one version.
 
 ## License
 
