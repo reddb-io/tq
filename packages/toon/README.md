@@ -52,7 +52,25 @@ closeTransform(stream)
 - `encodeLines(options?)` — incremental emitter. The header is written lazily with the first record, a schema change rotates the segment automatically, and `end()` closes the last one. `delimiter` defaults to `','`; `trailer: false` leaves the stream trailer-free.
 - `decodeLines(source)` — async generator, one record per row. Takes a string or an (async) iterable of chunks, so a socket or file stream flows straight through. Follows schema rotation, skips blank lines, and checks every trailer against the rows actually seen.
 - `closeTransform(input)` — closes the stream: each segment becomes one length-bearing canonical TOON document.
+- `ToonlDecodeStream()` / `ToonlEncodeStream(options?)` — Web Streams API transforms for `string | Uint8Array` TOONL chunks and record objects.
+- `JsonlToToonl(options?)` / `ToonlToJsonl()` — line-by-line bridges between JSONL and TOONL.
+- `recordTransform(fn, options?)` — maps or filters records and emits TOONL, preserving schema rotation in the output stream. Return `undefined` or `null` to drop a record.
+- `jsonToToon(input)` / `toonToJson(input)` — whole-document bridges for JSON and canonical TOON.
 - `encodeRecords(records, options?)`, `parseStream(input)`, `parseRecords(input)`, and the `ToonlEncoder` class cover the buffered cases.
+
+Node file helpers live in the `@reddb-io/toon/node` subpath so the main entry stays universal:
+
+```js
+import { readToonlFile, writeToonlFile } from '@reddb-io/toon/node'
+
+await writeToonlFile('users.toonl', [{ id: 1, name: 'Ada' }])
+
+for await (const record of readToonlFile('users.toonl')) {
+  console.log(record.name)
+}
+```
+
+The main entry uses standard Web Streams. In Node, bridge native streams with `Readable.toWeb(nodeReadable)` and `Readable.fromWeb(webReadable)` from `node:stream`.
 
 Failures throw a `ToonlError` (`line` is `0` when there is no line context).
 
