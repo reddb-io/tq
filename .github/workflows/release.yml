@@ -319,7 +319,9 @@ jobs:
           args: ${{ steps.changelog_range.outputs.range }} --tag ${{ needs.plan.outputs.release_tag }} --strip header
         env:
           OUTPUT: release-changelog.md
-          GITHUB_REPO: ${{ github.repository }}
+          # No GITHUB_REPO on purpose: setting it turns on git-cliff's
+          # GitHub-metadata integration, which this job's scoped token
+          # cannot query (403) and cliff.toml never renders anyway.
 
       - name: Compose release body
         env:
