@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 /// upstream instead of drifting from a vendored copy.
 const FIXTURE_ROOT: &str = "../../vendor/toon-spec/tests/fixtures";
 const EXPECTED_FAILURE_LEDGER: &str = "../../tests/toon/expected-failures.txt";
+const TOONL_FIXTURE_ROOT: &str = "../../tests/toonl/fixtures";
 
 #[test]
 fn official_toon_spec_fixtures_do_not_regress() {
@@ -109,6 +110,104 @@ fn official_toon_spec_fixtures_do_not_regress() {
     );
 }
 
+#[test]
+fn toonl_v0_1_fixtures_are_executable_spec_examples() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fixture_root = manifest_dir.join(TOONL_FIXTURE_ROOT);
+    assert!(
+        fixture_root.is_dir(),
+        "TOONL fixtures missing at {}",
+        fixture_root.display()
+    );
+
+    for fixture_path in fixture_paths_for_category(&fixture_root, "") {
+        let fixture = read_fixture(&fixture_path);
+        assert_eq!(
+            fixture.get("version").and_then(Json::as_str),
+            Some("toonl-v0.1"),
+            "{} declares the TOONL spec version",
+            fixture_path.display()
+        );
+        assert_eq!(
+            fixture.get("extension").and_then(Json::as_str),
+            Some(".toonl"),
+            "{} declares the canonical extension",
+            fixture_path.display()
+        );
+        assert_eq!(
+            fixture.get("mediaHint").and_then(Json::as_str),
+            Some("application/toonl"),
+            "{} declares the media hint",
+            fixture_path.display()
+        );
+
+        let tests = fixture
+            .get("tests")
+            .and_then(Json::as_array)
+            .expect("TOONL fixture tests");
+        for test in tests {
+            let name = test.get("name").and_then(Json::as_str).expect("test name");
+            let kind = test.get("kind").and_then(Json::as_str).expect("test kind");
+            let input = test.get("input").and_then(Json::as_str).unwrap_or_default();
+
+            match kind {
+                "decode" => {
+                    let actual = parse_toonl_v0_1(input)
+                        .unwrap_or_else(|err| panic!("{name}: decode failed: {err}"));
+                    let expected = test.get("segments").expect("decode segments");
+                    assert_eq!(
+                        segments_to_json(&actual),
+                        *expected,
+                        "{name}: decoded segments"
+                    );
+                }
+                "encode" => {
+                    let expected = test
+                        .get("expected")
+                        .and_then(Json::as_str)
+                        .expect("encode expected");
+                    assert_eq!(encode_toonl_fixture(test), expected, "{name}: encoded");
+                }
+                "close-transform" => {
+                    let expected = test
+                        .get("expectedToonDocuments")
+                        .and_then(Json::as_array)
+                        .expect("expected TOON documents");
+                    let actual = close_transform_toonl_v0_1(input)
+                        .unwrap_or_else(|err| panic!("{name}: close-transform failed: {err}"));
+                    let expected_strings = expected
+                        .iter()
+                        .map(|value| {
+                            value
+                                .as_str()
+                                .unwrap_or_else(|| panic!("{name}: expected TOON doc string"))
+                                .to_owned()
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(actual, expected_strings, "{name}: transformed docs");
+                    for document in actual {
+                        Value::parse_toon(&document)
+                            .unwrap_or_else(|err| panic!("{name}: TOON output invalid: {err}"));
+                    }
+                }
+                "error" => {
+                    let expected = test
+                        .get("expectedError")
+                        .and_then(Json::as_str)
+                        .expect("expected error");
+                    let actual = close_transform_toonl_v0_1(input)
+                        .expect_err("error fixture must be rejected");
+                    assert!(
+                        actual.contains(expected),
+                        "{name}: expected error containing {expected:?}, got {actual:?}"
+                    );
+                }
+                other => panic!("{name}: unknown TOONL fixture kind {other}"),
+            }
+        }
+    }
+}
+
 /// Maps a fixture's `options` object onto decoder options. Encoder-only options
 /// (`delimiter`, `keyFolding`, `flattenDepth`) carry no decoder meaning and are
 /// ignored; `indent` is shared by both sides.
@@ -144,17 +243,209 @@ fn fixture_paths(root: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     for category in ["decode", "encode"] {
         let dir = root.join(category);
-        for entry in
-            fs::read_dir(&dir).unwrap_or_else(|err| panic!("read {}: {err}", dir.display()))
-        {
-            let path = entry.expect("fixture dir entry").path();
-            if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
-                paths.push(path);
-            }
+        paths.extend(fixture_paths_for_category(&dir, ""));
+    }
+    paths.sort();
+    paths
+}
+
+fn fixture_paths_for_category(root: &Path, category: &str) -> Vec<PathBuf> {
+    let dir = if category.is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(category)
+    };
+    let mut paths = Vec::new();
+    for entry in fs::read_dir(&dir).unwrap_or_else(|err| panic!("read {}: {err}", dir.display())) {
+        let path = entry.expect("fixture dir entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+            paths.push(path);
         }
     }
     paths.sort();
     paths
+}
+
+#[derive(Debug)]
+struct ToonlSegment {
+    delimiter: char,
+    fields: Vec<String>,
+    rows: Vec<Vec<String>>,
+}
+
+fn close_transform_toonl_v0_1(input: &str) -> Result<Vec<String>, String> {
+    parse_toonl_v0_1(input).map(|segments| {
+        segments
+            .iter()
+            .map(|segment| {
+                let mut output = String::new();
+                output.push('[');
+                output.push_str(&segment.rows.len().to_string());
+                if segment.delimiter != ',' {
+                    output.push(segment.delimiter);
+                }
+                output.push_str("]{");
+                output.push_str(&segment.fields.join(&segment.delimiter.to_string()));
+                output.push_str("}:\n");
+                for row in &segment.rows {
+                    output.push_str("  ");
+                    output.push_str(&row.join(&segment.delimiter.to_string()));
+                    output.push('\n');
+                }
+                output
+            })
+            .collect()
+    })
+}
+
+fn parse_toonl_v0_1(input: &str) -> Result<Vec<ToonlSegment>, String> {
+    let mut segments = Vec::new();
+    let mut current: Option<ToonlSegment> = None;
+
+    for (offset, raw_line) in input.lines().enumerate() {
+        let line_number = offset + 1;
+        if raw_line.is_empty() {
+            continue;
+        }
+        if raw_line.starts_with("- ") {
+            return Err(format!("line {line_number}: reserved line prefix"));
+        }
+        if let Some(expected) = trailer_count(raw_line)? {
+            let segment = current
+                .take()
+                .ok_or_else(|| format!("line {line_number}: trailer without header"))?;
+            if segment.rows.len() != expected {
+                return Err(format!("line {line_number}: trailer count mismatch"));
+            }
+            segments.push(segment);
+            continue;
+        }
+        if let Some((delimiter, fields)) = parse_toonl_header(raw_line)? {
+            if let Some(segment) = current.take() {
+                segments.push(segment);
+            }
+            current = Some(ToonlSegment {
+                delimiter,
+                fields,
+                rows: Vec::new(),
+            });
+            continue;
+        }
+
+        let segment = current
+            .as_mut()
+            .ok_or_else(|| format!("line {line_number}: row before header"))?;
+        let row = raw_line
+            .split(segment.delimiter)
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        if row.len() != segment.fields.len() {
+            return Err(format!("line {line_number}: row arity mismatch"));
+        }
+        segment.rows.push(row);
+    }
+
+    if let Some(segment) = current {
+        segments.push(segment);
+    }
+
+    Ok(segments)
+}
+
+fn parse_toonl_header(line: &str) -> Result<Option<(char, Vec<String>)>, String> {
+    let Some(close_bracket) = line.find(']') else {
+        return Ok(None);
+    };
+    if !line.starts_with('[') {
+        return Ok(None);
+    }
+    let delimiter = match &line[1..close_bracket] {
+        "" => ',',
+        "|" => '|',
+        "\t" => '\t',
+        other if other.starts_with('=') => return Ok(None),
+        _ => return Err("invalid header delimiter".to_owned()),
+    };
+    let suffix = &line[close_bracket + 1..];
+    if !suffix.starts_with('{') || !suffix.ends_with("}:") {
+        return Err("invalid header".to_owned());
+    }
+    let field_text = &suffix[1..suffix.len() - 2];
+    let fields = field_text
+        .split(delimiter)
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    if fields.is_empty() || fields.iter().any(String::is_empty) {
+        return Err("invalid header fields".to_owned());
+    }
+    Ok(Some((delimiter, fields)))
+}
+
+fn trailer_count(line: &str) -> Result<Option<usize>, String> {
+    if !(line.starts_with("[=") && line.ends_with(']')) {
+        return Ok(None);
+    }
+    line[2..line.len() - 1]
+        .parse::<usize>()
+        .map(Some)
+        .map_err(|_| "invalid trailer count".to_owned())
+}
+
+fn segments_to_json(segments: &[ToonlSegment]) -> Json {
+    Json::Array(
+        segments
+            .iter()
+            .map(|segment| {
+                serde_json::json!({
+                    "delimiter": segment.delimiter.to_string(),
+                    "fields": segment.fields,
+                    "rows": segment.rows,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn encode_toonl_fixture(test: &Json) -> String {
+    let delimiter = test
+        .get("delimiter")
+        .and_then(Json::as_str)
+        .and_then(|value| value.chars().next())
+        .unwrap_or(',');
+    let fields = test
+        .get("fields")
+        .and_then(Json::as_array)
+        .expect("encode fields")
+        .iter()
+        .map(|value| value.as_str().expect("field string"))
+        .collect::<Vec<_>>();
+    let rows = test
+        .get("rows")
+        .and_then(Json::as_array)
+        .expect("encode rows");
+
+    let mut output = String::new();
+    output.push('[');
+    if delimiter != ',' {
+        output.push(delimiter);
+    }
+    output.push_str("]{");
+    output.push_str(&fields.join(&delimiter.to_string()));
+    output.push_str("}:\n");
+    for row in rows {
+        let cells = row
+            .as_array()
+            .expect("row array")
+            .iter()
+            .map(|value| value.as_str().expect("cell string"))
+            .collect::<Vec<_>>();
+        output.push_str(&cells.join(&delimiter.to_string()));
+        output.push('\n');
+    }
+    output.push_str("[=");
+    output.push_str(&rows.len().to_string());
+    output.push_str("]\n");
+    output
 }
 
 fn read_fixture(path: &Path) -> Json {
