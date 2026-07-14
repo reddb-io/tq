@@ -37,7 +37,14 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<String, String> {
-    let options = parse_args(env::args().skip(1))?;
+    let mut args = env::args().skip(1).peekable();
+    if args
+        .peek()
+        .is_some_and(|arg| arg == "-V" || arg == "--version")
+    {
+        return Ok(format!("tq {}\n", env!("CARGO_PKG_VERSION")));
+    }
+    let options = parse_args(args)?;
 
     let input = match &options.input_path {
         Some(path) => fs::read_to_string(path).map_err(|error| format!("{path}: {error}"))?,

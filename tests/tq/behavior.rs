@@ -257,6 +257,18 @@ fn reports_argument_and_input_errors() {
 }
 
 #[test]
+fn reports_the_crate_version_for_the_version_flags() {
+    for flag in ["--version", "-V"] {
+        let output = run_tq(&[flag], "");
+        assert_eq!(output.status.code(), Some(0), "{flag} exits cleanly");
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("stdout is utf-8"),
+            format!("tq {}\n", env!("CARGO_PKG_VERSION"))
+        );
+    }
+}
+
+#[test]
 fn reads_the_query_after_a_double_dash_and_the_input_from_a_file() {
     let path = std::env::temp_dir().join("tq-behavior-input.json");
     std::fs::write(&path, SAMPLE).expect("write temp input");
