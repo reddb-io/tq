@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/hero.svg" alt="tq — jq for TOON. Query, convert, and shape TOON ⇄ JSON." width="100%">
+<img src="docs/hero.svg" alt="tq — jq for TOON &amp; TOONL. Query, convert, and stream TOON ⇄ JSON." width="100%">
 
 [![Release](https://img.shields.io/github/v/release/reddb-io/tq?include_prereleases&style=for-the-badge&color=ff2056&labelColor=0d1117)](https://github.com/reddb-io/tq/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/reddb-io/tq/ci.yml?branch=main&style=for-the-badge&label=CI&labelColor=0d1117)](https://github.com/reddb-io/tq/actions/workflows/ci.yml)
@@ -16,6 +16,8 @@
 **TOON** (Token-Oriented Object Notation) is a data format designed for one job: putting structured data into an LLM prompt without paying for punctuation. It keeps JSON's data model — objects, arrays, strings, numbers, booleans, null — and drops the syntax tax. Uniform arrays of objects collapse into a header plus rows, so a field name is written once instead of once per record.
 
 **tq** is the command-line tool for that format: a jq-style query language over TOON, and a lossless bidirectional converter between TOON and JSON. One static binary, no runtime, no dependencies.
+
+**TOONL** is TOON for data that keeps arriving: one record per line, header written once, appended forever — the same token savings, but streamable and verifiable, and `tq` reads and writes it record by record in constant memory. See [TOONL — append-only streams](#toonl--append-only-streams).
 
 ### The same payload, both ways
 
@@ -331,6 +333,23 @@ $ printf '{"users":[{"id":1,"name":"Ada"},{"id":2,"name":"Bob"}]}' | tq -p json 
 1,Ada
 2,Bob
 [=2]
+```
+
+Rotation is not a special case on the way in either — a new header mid-stream changes the shape of every record after it, and the output follows immediately:
+
+```console
+$ printf '[]{a}:\n1\n[]{a,b}:\n2,3\n' | tq -p toonl -o json -c .
+{"a":1}
+{"a":2,"b":3}
+```
+
+And the trailer is what makes a closed stream self-checking: if the row count does not match `[=N]`, `tq` fails loudly instead of handing you a truncated stream.
+
+```console
+$ printf '[]{a}:\n1\n2\n[=9]\n' | tq -p toonl -o json -c .
+error: line 4: trailer count mismatch
+$ echo $?
+1
 ```
 
 ### Why bother? Tokens.
