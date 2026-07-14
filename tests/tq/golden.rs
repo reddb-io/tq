@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::process::{Command, Stdio};
 
 #[derive(Debug)]
@@ -182,12 +182,16 @@ fn run_tq(args: &[&str], stdin: &str) -> std::process::Output {
         .spawn()
         .expect("spawn tq");
 
-    child
+    if let Err(error) = child
         .stdin
         .as_mut()
         .expect("stdin is piped")
         .write_all(stdin.as_bytes())
-        .expect("write stdin");
+    {
+        // A tq that fails fast (usage error) may exit before reading stdin;
+        // the resulting broken pipe is not a test failure.
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe, "write stdin");
+    }
 
     child.wait_with_output().expect("wait for tq")
 }
@@ -201,12 +205,14 @@ fn run_jq(filter: &str, stdin: &str) -> std::process::Output {
         .spawn()
         .expect("spawn jq");
 
-    child
+    if let Err(error) = child
         .stdin
         .as_mut()
         .expect("stdin is piped")
         .write_all(stdin.as_bytes())
-        .expect("write jq stdin");
+    {
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe, "write jq stdin");
+    }
 
     child.wait_with_output().expect("wait for jq")
 }

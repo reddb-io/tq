@@ -340,6 +340,11 @@ jobs:
 
           ## Installation
 
+          **Installer script** (Linux/macOS — detects your platform, verifies checksums, installs or updates in place):
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | sh
+          \`\`\`
+
           **Cargo:**
           \`\`\`bash
           cargo install reddb-io-tq   # installs the \`tq\` binary
