@@ -1880,3 +1880,57 @@ fn encoding_rejects_a_delimiter_outside_the_declared_set() {
         .expect_err("semicolon is not a valid document delimiter");
     assert_eq!(error.to_string(), "invalid array header");
 }
+
+#[test]
+fn a_non_count_cell_in_a_child_table_column_decodes_as_a_nested_object() {
+    // Decoding stays lenient per row: row 1 consumes an indented child table,
+    // while row 2's non-count cell falls back to the nested-object reading.
+    assert_eq!(
+        json_of("items[2]{a,kids{x}}:\n  1,1\n    r1\n  2,zz\n"),
+        json!({"items": [
+            {"a": 1, "kids": [{"x": "r1"}]},
+            {"a": 2, "kids": {"x": "zz"}}
+        ]})
+    );
+}
+
+#[test]
+fn an_empty_child_array_in_a_child_table_column_round_trips() {
+    assert_eq!(
+        json_of("items[2]{a,kids{x}}:\n  1,1\n    r1\n  2,0\n"),
+        json!({"items": [
+            {"a": 1, "kids": [{"x": "r1"}]},
+            {"a": 2, "kids": []}
+        ]})
+    );
+}
+
+#[test]
+fn fallible_canonical_encoders_and_error_accessors_round_trip() {
+    // Convenience wrappers around the canonical encoders.
+    let value = parse("a[2]: 1,2\n");
+    assert_eq!(value.try_to_canonical_toon().expect("value"), "a[2]: 1,2\n");
+    let document = value.as_object().expect("object");
+    let array = document.get("a").expect("a").as_array().expect("array");
+    assert_eq!(array.try_to_canonical_toon().expect("array"), "[2]: 1,2\n");
+
+    // detect_truncation with default options mirrors the _with_options form.
+    let report = reddb_io_toon::detect_truncation("v: 1\n   bad: 2\n");
+    assert!(!report.complete);
+
+    // EncodeError::message exposes the static message.
+    let options = EncodeOptions {
+        delimiter: ';',
+        ..EncodeOptions::default()
+    };
+    let encode_error = value
+        .try_to_toon_with_options(options)
+        .expect_err("bad delimiter");
+    assert_eq!(encode_error.message(), "invalid array header");
+
+    // Trailing content after a complete root array is a parse error.
+    assert_eq!(
+        error("[2]: 1,2\nextra: 3\n"),
+        "line 2: expected end of document"
+    );
+}
