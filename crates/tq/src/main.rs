@@ -11,7 +11,7 @@ use reddb_io_toon::{
 };
 
 const USAGE: &str =
-    "usage: tq [-p toon|json|toonl] [-o toon|json|toonl] [-r] [-c] [-s|--slurp] [--nested-tabular-headers] [--keyed-map-collapse] <query> [file]";
+    "usage: tq [-p toon|json|toonl] [-o toon|json|toonl] [-r] [-c] [-s|--slurp] [--delimiter comma|tab|pipe] [--nested-tabular-headers] [--keyed-map-collapse] <query> [file]";
 const TRIM_USAGE: &str = "usage: tq trim --keep-last N [--in-place] [FILE]";
 const CLOSE_USAGE: &str = "usage: tq close [--per-lane|--interleaved] [FILE]";
 const CHECK_USAGE: &str = "usage: tq check [-p toon|toonl] [FILE]";
@@ -32,6 +32,7 @@ struct Options {
     raw_output: bool,
     compact: bool,
     slurp: bool,
+    delimiter: char,
     nested_tabular_headers: bool,
     keyed_map_collapse: bool,
 }
@@ -214,6 +215,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Options, String> {
     let mut raw_output = false;
     let mut compact = false;
     let mut slurp = false;
+    let mut delimiter = ',';
     let mut nested_tabular_headers = false;
     let mut keyed_map_collapse = false;
     let mut positional = Vec::new();
@@ -232,6 +234,10 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Options, String> {
             "-r" => raw_output = true,
             "-c" => compact = true,
             "-s" | "--slurp" => slurp = true,
+            "--delimiter" => {
+                let value = args.next().ok_or_else(|| USAGE.to_owned())?;
+                delimiter = parse_delimiter(&value)?;
+            }
             "--nested-tabular-headers" => nested_tabular_headers = true,
             "--keyed-map-collapse" => keyed_map_collapse = true,
             "--" => {
@@ -259,9 +265,19 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Options, String> {
         raw_output,
         compact,
         slurp,
+        delimiter,
         nested_tabular_headers,
         keyed_map_collapse,
     })
+}
+
+fn parse_delimiter(value: &str) -> Result<char, String> {
+    match value {
+        "comma" | "," => Ok(','),
+        "tab" | "\\t" => Ok('\t'),
+        "pipe" | "|" => Ok('|'),
+        _ => Err("unsupported delimiter; expected comma, tab, or pipe".to_owned()),
+    }
 }
 
 fn parse_trim_args(args: impl Iterator<Item = String>) -> Result<TrimOptions, String> {
@@ -1933,6 +1949,7 @@ fn format_values(values: &[Value], options: &Options) -> Result<String, String> 
                         .try_to_toon_with_options(EncodeOptions {
                             nested_tabular_headers: options.nested_tabular_headers,
                             keyed_map_collapse: options.keyed_map_collapse,
+                            delimiter: options.delimiter,
                             ..EncodeOptions::default()
                         })
                         .map_err(|error| error.to_string())?,
