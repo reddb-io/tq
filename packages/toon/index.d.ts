@@ -114,6 +114,9 @@ export function parseRecords(input: string): ToonlRecord[]
 /** Closes a TOONL stream: one canonical TOON document per segment. */
 export function closeTransform(input: string): string[]
 
+/** Closes a multiplexed TOONL stream while preserving lane interleaving. */
+export function closeTransformInterleaved(input: string): string[]
+
 /** Converts a whole JSON document string to canonical TOON. */
 export function jsonToToon(input: string): string
 
