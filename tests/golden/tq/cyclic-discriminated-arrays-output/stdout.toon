@@ -1,0 +1,32 @@
+@toon-cyclic-discriminated-array/1
+@root {"events":"$C0"}
+@array $C0 discr=type n=12 common=tenant,seq,actor order=cycle(login,purchase,logout)*4
+@common
+"acme"	1	"u1"
+"acme"	2	"u1"
+"acme"	3	"u1"
+"acme"	4	"u2"
+"acme"	5	"u2"
+"acme"	6	"u2"
+"acme"	7	"u3"
+"acme"	8	"u3"
+"acme"	9	"u3"
+"acme"	10	"u4"
+"acme"	11	"u4"
+"acme"	12	"u4"
+@group login n=4
+{"ok":true}
+{"ok":true}
+{"ok":false}
+{"ok":true}
+@group purchase n=4
+{"amount":12.5,"currency":"USD"}
+{"amount":4,"currency":"EUR"}
+{"amount":99.95,"currency":"USD"}
+{"amount":1.25,"currency":"BRL"}
+@group logout n=4
+{"durationMs":1200}
+{"durationMs":900}
+{"durationMs":1800}
+{"durationMs":600}
+@end
