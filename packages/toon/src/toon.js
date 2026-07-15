@@ -278,7 +278,7 @@ function parseTabularRows(header, fields, lines, cursor, rowDepth, options) {
     }
     const row = {}
     fields.forEach((field, index) => {
-      setKey(row, field, parseScalar(cells[index], line.number))
+      insertPath(row, field, parseScalar(cells[index], line.number), options, line.number)
     })
     rows.push(row)
     cursor.index += 1
@@ -452,18 +452,128 @@ function parseHeader(content, colon) {
   if (suffix === '') {
     fields = undefined
   } else if (suffix.startsWith('{') && suffix.endsWith('}') && suffix.length >= 2) {
-    let names
     try {
-      names = splitDelimited(suffix.slice(1, -1), delimiter, 0)
-      fields = names.map((name) => parseKey(name, 0)[0])
-    } catch {
-      throw toonError(0, 'invalid array header')
+      fields = parseHeaderFields(suffix.slice(1, -1), delimiter)
+    } catch (error) {
+      throw toonError(0, error.reason === 'duplicate key' ? 'duplicate key' : 'invalid array header')
     }
   } else {
     throw toonError(0, 'invalid array header')
   }
 
   return { key, keyQuoted, len, delimiter, fields }
+}
+
+function parseHeaderFields(source, delimiter) {
+  const paths = []
+  let index = 0
+
+  function parseList(prefix, nested) {
+    let count = 0
+
+    while (index < source.length) {
+      if (nested && source[index] === '}') {
+        break
+      }
+      if (source[index] === delimiter || source[index] === '}') {
+        throw toonError(0, 'invalid array header')
+      }
+
+      const start = index
+      while (index < source.length) {
+        const character = source[index]
+        if (character === '"') {
+          skipQuotedHeaderKey()
+          continue
+        }
+        if (character === delimiter || character === '{' || character === '}') {
+          break
+        }
+        index += 1
+      }
+
+      const [key] = parseKey(source.slice(start, index), 0)
+      if (key === '') {
+        throw toonError(0, 'invalid array header')
+      }
+
+      count += 1
+      if (source[index] === '{') {
+        index += 1
+        const before = paths.length
+        parseList([...prefix, key], true)
+        if (source[index] !== '}' || paths.length === before) {
+          throw toonError(0, 'invalid array header')
+        }
+        index += 1
+      } else {
+        paths.push([...prefix, key])
+      }
+
+      if (source[index] === delimiter) {
+        index += 1
+        if (index >= source.length || source[index] === '}') {
+          throw toonError(0, 'invalid array header')
+        }
+        continue
+      }
+      if (nested ? source[index] === '}' : index === source.length) {
+        break
+      }
+      throw toonError(0, 'invalid array header')
+    }
+
+    if (count === 0) {
+      throw toonError(0, 'invalid array header')
+    }
+  }
+
+  function skipQuotedHeaderKey() {
+    index += 1
+    while (index < source.length) {
+      const character = source[index]
+      index += 1
+      if (character === '\\') {
+        index += 1
+      } else if (character === '"') {
+        return
+      }
+    }
+  }
+
+  parseList([], false)
+  if (index !== source.length) {
+    throw toonError(0, 'invalid array header')
+  }
+
+  const seen = new Set()
+  for (let index = 0; index < paths.length; index += 1) {
+    for (let other = index + 1; other < paths.length; other += 1) {
+      if (
+        samePath(paths[index], paths[other]) ||
+        pathStartsWith(paths[index], paths[other]) ||
+        pathStartsWith(paths[other], paths[index])
+      ) {
+        throw toonError(0, 'duplicate key')
+      }
+    }
+  }
+  for (const path of paths) {
+    const key = path.join('\u0000')
+    if (seen.has(key)) {
+      throw toonError(0, 'duplicate key')
+    }
+    seen.add(key)
+  }
+  return paths
+}
+
+function samePath(left, right) {
+  return left.length === right.length && pathStartsWith(left, right)
+}
+
+function pathStartsWith(path, prefix) {
+  return prefix.every((segment, index) => path[index] === segment)
 }
 
 function atLine(error, line) {
