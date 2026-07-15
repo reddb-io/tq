@@ -93,14 +93,15 @@ differ:
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | tagged-300 | primitive-array-column | 24,794 | 25,359 | 12,784 | −48.4% | 8,113 | 10,181 | 5,723 | −29.5% | JSON 6,506 / TOON 8,698 / hyp 4,325 |
 
-Result: primitive-list cells are a real, measured win — roughly **−48% bytes**
-and **−30% tokens** versus JSON on the tagged corpus — and remain worth pursuing.
+Result: primitive-list cells remain part of the measured benchmark program. Keep
+current bytes and token figures in `../../benchmarks/results/` rather than in
+this proposal text.
 
 ## Why it is a good decision
 
 It recovers table amortization for the extremely common "row + small list of
-labels" shape, at a large measured saving, while keeping every ineligible case in
-ordinary v3.3. The **one accepted weakness**, raised and accepted at grammar
+labels" shape while keeping every ineligible case in ordinary v3.3. The **one
+accepted weakness**, raised and accepted at grammar
 freeze, is a guardrail gap: the parent `[N]` row count still checks row count and
 `{fields}` still checks row width, but a primitive-list cell does **not** declare
 each list's item count. A malformed quoted subcell is caught by the quote
