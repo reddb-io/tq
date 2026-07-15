@@ -1,0 +1,3 @@
+items[2]{id,tags[;],note}:
+  1,hot;fragile,"a,b"
+  2,"semi;quoted",plain
