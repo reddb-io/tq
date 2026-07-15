@@ -11,11 +11,14 @@ import { ToonError, toonError } from './errors.js'
 import {
   DOCUMENT_DELIMITER,
   canonicalKey,
+  canonicalString,
   findUnquoted,
   isPrimitive,
+  needsQuotes,
   parseKey,
   parseScalar,
   primitiveText,
+  quoteString,
   setKey,
   splitDelimited,
   splitLines,
@@ -982,6 +985,7 @@ export function serialize(value, options = {}) {
   const resolved = {
     nestedTabularHeaders: options.nestedTabularHeaders === true,
     keyedMapCollapse: options.keyedMapCollapse === true,
+    primitiveArrayColumns: options.primitiveArrayColumns === true,
     delimiter,
     maxDepth: rawMaxDepth === Number.POSITIVE_INFINITY ? 0 : Math.max(0, Math.floor(rawMaxDepth)),
   }
@@ -1031,7 +1035,7 @@ function writeField(output, key, value, depth, options) {
           canonicalKey(rowKey),
           ': ',
           shape.paths
-            .map((path) => primitiveText(valueAtPath(rowValue, path), options.delimiter))
+            .map((path) => tabularCellText(valueAtPath(rowValue, path), path, shape, options))
             .join(options.delimiter),
           '\n',
         )
@@ -1080,7 +1084,7 @@ function writeArray(output, key, values, depth, listItem, options) {
       writeIndent(output, depth + 1)
       output.push(
         shape.paths
-          .map((path) => primitiveText(valueAtPath(value, path), options.delimiter))
+          .map((path) => tabularCellText(valueAtPath(value, path), path, shape, options))
           .join(options.delimiter),
       )
       output.push('\n')
@@ -1187,6 +1191,10 @@ function objectShape(records, options, depth) {
     if (cells.every(({ value }) => isPrimitive(value))) {
       continue
     }
+    if (options.primitiveArrayColumns && cells.every(({ value }) => primitiveArrayCell(value))) {
+      field.listDelimiter = primitiveArrayColumnDelimiter(options.delimiter)
+      continue
+    }
     if (!options.nestedTabularHeaders) {
       return undefined
     }
@@ -1216,8 +1224,49 @@ function valueAtPath(value, path) {
 }
 
 function headerFieldText(field, delimiter) {
+  if (field.listDelimiter !== undefined) {
+    return `${canonicalKey(field.key)}[${field.listDelimiter}]`
+  }
   if (field.children === undefined) {
     return canonicalKey(field.key)
   }
   return `${canonicalKey(field.key)}{${field.children.map((child) => headerFieldText(child, delimiter)).join(delimiter)}}`
+}
+
+function primitiveArrayCell(value) {
+  return Array.isArray(value) && value.every(isPrimitive)
+}
+
+function primitiveArrayColumnDelimiter(activeDelimiter) {
+  return activeDelimiter === ';' ? '~' : ';'
+}
+
+function tabularCellText(value, path, shape, options) {
+  const field = fieldAtPath(shape.fields, path)
+  if (field?.listDelimiter === undefined) {
+    return primitiveText(value, options.delimiter)
+  }
+  return value.map((item) => primitiveTextForListItem(item, options.delimiter, field.listDelimiter)).join(field.listDelimiter)
+}
+
+function fieldAtPath(fields, path) {
+  let cursor = fields
+  let field
+  for (const segment of path) {
+    field = cursor.find((candidate) => candidate.key === segment)
+    if (field === undefined) {
+      return undefined
+    }
+    cursor = field.children ?? []
+  }
+  return field
+}
+
+function primitiveTextForListItem(value, activeDelimiter, listDelimiter) {
+  if (typeof value === 'string') {
+    return needsQuotes(value, activeDelimiter) || needsQuotes(value, listDelimiter)
+      ? quoteString(value)
+      : canonicalString(value, listDelimiter)
+  }
+  return primitiveText(value, listDelimiter)
 }
