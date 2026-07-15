@@ -53,6 +53,31 @@ const document = parse('users[2]{id,name}:\n  1,Ada\n  2,Linus\n')
 console.log(document.users[0].name)
 process.stdout.write(serialize(document))
 ```
+```console
+Ada
+users[2]{id,name}:
+  1,Ada
+  2,Linus
+```
+
+```js
+import { encodeRecords, parseRecords } from '@reddb-io/toon'
+
+const stream = encodeRecords([
+  { id: 1, name: 'Ada' },
+  { id: 2, name: 'Linus' },
+])
+
+process.stdout.write(stream)
+console.log(JSON.stringify(parseRecords(stream)))
+```
+```console
+[]{id,name}:
+1,Ada
+2,Linus
+[=2]
+[{"id":1,"name":"Ada"},{"id":2,"name":"Linus"}]
+```
 
 Details: [`packages/toon`](packages/toon), [TOON spec companion](docs/toon-official-spec.md), [RedDB TOON extensions](docs/toon-reddb-spec.md), and [TOONL spec](docs/toonl-reddb-spec.md).
 
