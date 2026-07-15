@@ -1,5 +1,7 @@
 # @reddb-io/toon
 
+> **Attribution:** This is RedDB's TypeScript implementation of TOON — not the original project. The TOON format was created by Johann Schopplich; see the [official repo](https://github.com/toon-format/toon) and [toonformat.dev](https://toonformat.dev) for the format spec and original project.
+
 TOON v3.3 parser and serializer, plus TOONL v0.1 append-only streaming — in dependency-free ESM.
 
 TOON ([Token-Oriented Object Notation](https://github.com/toon-format/spec)) is JSON's data model in a layout that costs far fewer tokens to hand to a model. This package decodes TOON to plain JSON values and encodes them back to canonical TOON, and it runs the **official spec corpus** — all 389 fixtures, no exceptions — as part of its test suite, alongside the Rust implementation that powers the [`tq`](https://github.com/reddb-io/toon) CLI.
