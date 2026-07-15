@@ -161,6 +161,7 @@ function caseEntry({ name, description, value, honestyZeroDelta = false, specTok
   const expectedBytes = {
     jsonMin: compactJsonBytes(value),
     toonV3: toonBytes(value),
+    toonTab: toonBytes(value, { delimiter: '\t' }),
     toonExt: toonBytes(value, { nestedTabularHeaders: true, keyedMapCollapse: true }),
   }
   return {
