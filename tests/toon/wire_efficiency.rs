@@ -131,6 +131,50 @@ fn primitive_array_column_corpus_decodes_identically_for_rust() {
     }
 }
 
+#[test]
+fn primitive_array_column_encoding_is_opt_in_and_falls_back_losslessly_for_rust() {
+    let eligible = serde_json::json!({
+        "items": [
+            { "id": 1, "tags": ["hot", "fragile"], "note": "a,b" },
+            { "id": 2, "tags": ["semi;quoted"], "note": "plain" }
+        ]
+    });
+    let value = Value::from_json_value(eligible.clone());
+    let encoded = value.to_toon_with_options(EncodeOptions {
+        primitive_array_columns: true,
+        ..EncodeOptions::default()
+    });
+    assert_eq!(
+        encoded,
+        "items[2]{id,tags[;],note}:\n  1,hot;fragile,\"a,b\"\n  2,\"semi;quoted\",plain\n"
+    );
+    assert_eq!(
+        value.to_canonical_toon(),
+        "items[2]:\n  - id: 1\n    tags[2]: hot,fragile\n    note: \"a,b\"\n  - id: 2\n    tags[1]: semi;quoted\n    note: plain\n"
+    );
+    assert_eq!(
+        Value::parse_toon(&encoded).unwrap().to_json_value(),
+        eligible
+    );
+
+    let ineligible = serde_json::json!({
+        "items": [
+            { "id": 1, "tags": null },
+            { "id": 2, "tags": ["ok"] }
+        ]
+    });
+    let value = Value::from_json_value(ineligible.clone());
+    let encoded = value.to_toon_with_options(EncodeOptions {
+        primitive_array_columns: true,
+        ..EncodeOptions::default()
+    });
+    assert_eq!(encoded, value.to_canonical_toon());
+    assert_eq!(
+        Value::parse_toon(&encoded).unwrap().to_json_value(),
+        ineligible
+    );
+}
+
 fn fixture_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative)
 }
@@ -145,6 +189,7 @@ fn ext_options() -> EncodeOptions {
     EncodeOptions {
         nested_tabular_headers: true,
         keyed_map_collapse: true,
+        primitive_array_columns: true,
         ..EncodeOptions::default()
     }
 }
