@@ -1,5 +1,28 @@
 # TOONL — Token-Oriented Object Notation, Lines
 
+**tl;dr:** TOONL is a line-oriented streaming format for appendable logs of flat records that close back into valid TOON v3.3 documents. One record per line, header once, append forever — with v0.2 additions for resumable readers, header-preserving trim, tagged-row multiplexing, and side-journal retry patterns. Credit: toon-format team.
+
+## Table of Contents
+
+- [Acknowledgment](#acknowledgment)
+- [Introduction](#introduction)
+- [Identity](#identity)
+- [Terminology](#terminology)
+- [Data Model](#data-model)
+- [Encoding](#encoding)
+- [Grammar](#grammar)
+- [Headers And Rotation](#headers-and-rotation)
+- [Trailers](#trailers)
+- [Close-Transform](#close-transform)
+- [Closure Properties (v0.2)](#closure-properties-v02)
+- [R1 — Resumable Readers (v0.2)](#r1--resumable-readers-v02)
+- [R2 — Header-Preserving Trim (v0.2)](#r2--header-preserving-trim-v02)
+- [R3 — Tagged-Row Multiplexing (v0.2)](#r3--tagged-row-multiplexing-v02)
+- [R4 — In-Place Splice Non-Goal And The Side-Journal Pattern (v0.2)](#r4--in-place-splice-non-goal-and-the-side-journal-pattern-v02)
+- [Versioning And Compatibility](#versioning-and-compatibility)
+- [Relationship To TOON v3.3](#relationship-to-toon-v33)
+- [Conformance](#conformance)
+
 ## Acknowledgment
 
 TOONL stands on the shoulders of **TOON**, the Token-Oriented Object Notation
