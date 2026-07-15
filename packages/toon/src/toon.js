@@ -634,12 +634,15 @@ export function isPlainObject(value) {
 // ---------------------------------------------------------------------------
 
 /** Encodes a JSON value as canonical TOON (default profile). */
-export function serialize(value) {
+export function serialize(value, options = {}) {
+  const resolved = {
+    nestedTabularHeaders: options.nestedTabularHeaders === true,
+  }
   const output = []
   if (Array.isArray(value)) {
-    writeArray(output, undefined, value, 0, false)
+    writeArray(output, undefined, value, 0, false, resolved)
   } else if (isPlainObject(value)) {
-    writeFields(output, value, 0)
+    writeFields(output, value, 0, resolved)
   } else {
     output.push(primitiveText(value, DOCUMENT_DELIMITER))
   }
@@ -650,22 +653,22 @@ function writeIndent(output, depth) {
   output.push(' '.repeat(depth * DEFAULT_INDENT))
 }
 
-function writeFields(output, document, depth) {
+function writeFields(output, document, depth, options) {
   for (const [key, value] of Object.entries(document)) {
     writeIndent(output, depth)
-    writeField(output, key, value, depth)
+    writeField(output, key, value, depth, options)
   }
 }
 
 /** Writes `key: value` at the caller's cursor (indent or `- ` already emitted). */
-function writeField(output, key, value, depth) {
+function writeField(output, key, value, depth, options) {
   if (Array.isArray(value)) {
-    writeArray(output, key, value, depth, false)
+    writeArray(output, key, value, depth, false, options)
     return
   }
   if (isPlainObject(value)) {
     output.push(canonicalKey(key), ':\n')
-    writeFields(output, value, depth + 1)
+    writeFields(output, value, depth + 1, options)
     return
   }
   output.push(canonicalKey(key), ': ', primitiveText(value, DOCUMENT_DELIMITER), '\n')
@@ -675,7 +678,7 @@ function writeField(output, key, value, depth) {
  * Writes an array header plus body. `listItem` selects the empty-array form:
  * `[0]:` inside a list (§9.2) versus `key: []` / `[]` elsewhere (§9.1).
  */
-function writeArray(output, key, values, depth, listItem) {
+function writeArray(output, key, values, depth, listItem, options) {
   if (values.length === 0) {
     if (key !== undefined) {
       output.push(canonicalKey(key), ': []\n')
@@ -697,14 +700,16 @@ function writeArray(output, key, values, depth, listItem) {
 
   // In list-item position the tabular form has nowhere to put its field list, so
   // §9.4 requires the expanded list even for a uniform array of objects.
-  const fields = listItem ? undefined : tabularFields(values)
-  if (fields !== undefined) {
-    writeArrayHeader(output, key, values.length, fields)
+  const shape = listItem ? undefined : tabularShape(values, options)
+  if (shape !== undefined) {
+    writeArrayHeader(output, key, values.length, shape.fields)
     output.push('\n')
     for (const value of values) {
       writeIndent(output, depth + 1)
       output.push(
-        fields.map((field) => primitiveText(value[field], DOCUMENT_DELIMITER)).join(DOCUMENT_DELIMITER),
+        shape.paths
+          .map((path) => primitiveText(valueAtPath(value, path), DOCUMENT_DELIMITER))
+          .join(DOCUMENT_DELIMITER),
       )
       output.push('\n')
     }
@@ -715,14 +720,14 @@ function writeArray(output, key, values, depth, listItem) {
   output.push('\n')
   for (const value of values) {
     writeIndent(output, depth + 1)
-    writeListItem(output, value, depth + 1)
+    writeListItem(output, value, depth + 1, options)
   }
 }
 
-function writeListItem(output, value, depth) {
+function writeListItem(output, value, depth, options) {
   if (Array.isArray(value)) {
     output.push('- ')
-    writeArray(output, undefined, value, depth, true)
+    writeArray(output, undefined, value, depth, true, options)
     return
   }
   if (isPlainObject(value)) {
@@ -732,10 +737,10 @@ function writeListItem(output, value, depth) {
       return
     }
     output.push('- ')
-    writeField(output, entries[0][0], entries[0][1], depth + 1)
+    writeField(output, entries[0][0], entries[0][1], depth + 1, options)
     for (const [key, nested] of entries.slice(1)) {
       writeIndent(output, depth + 1)
-      writeField(output, key, nested, depth + 1)
+      writeField(output, key, nested, depth + 1, options)
     }
     return
   }
@@ -748,7 +753,7 @@ function writeArrayHeader(output, key, len, fields) {
   }
   output.push('[', String(len), ']')
   if (fields !== undefined) {
-    output.push('{', fields.map(canonicalKey).join(DOCUMENT_DELIMITER), '}')
+    output.push('{', fields.map(headerFieldText).join(DOCUMENT_DELIMITER), '}')
   }
   output.push(':')
 }
@@ -758,16 +763,27 @@ function writeArrayHeader(output, key, len, fields) {
  * first element's key set, and every value is primitive.
  */
 export function tabularFields(values) {
-  const first = values[0]
+  const shape = tabularShape(values, { nestedTabularHeaders: false })
+  return shape?.fields.map((field) => field.key)
+}
+
+function tabularShape(values, options) {
+  const shape = objectShape(values.map((value) => ({ value })), options)
+  return shape === undefined ? undefined : { fields: shape, paths: leafPaths(shape) }
+}
+
+function objectShape(records, options) {
+  const first = records[0]?.value
   if (!isPlainObject(first)) {
     return undefined
   }
-  const fields = Object.keys(first)
+  const fields = Object.keys(first).map((key) => ({ key }))
+
   if (fields.length === 0) {
     return undefined
   }
 
-  for (const value of values) {
+  for (const { value } of records) {
     if (!isPlainObject(value)) {
       return undefined
     }
@@ -775,13 +791,47 @@ export function tabularFields(values) {
     if (keys.length !== fields.length) {
       return undefined
     }
-    if (keys.some((key) => !isPrimitive(value[key]))) {
-      return undefined
-    }
-    if (fields.some((field) => !Object.prototype.hasOwnProperty.call(value, field))) {
+    if (fields.some((field) => !Object.prototype.hasOwnProperty.call(value, field.key))) {
       return undefined
     }
   }
 
+  for (const field of fields) {
+    const cells = records.map(({ value }) => ({ value: value[field.key] }))
+    if (cells.every(({ value }) => isPrimitive(value))) {
+      continue
+    }
+    if (!options.nestedTabularHeaders) {
+      return undefined
+    }
+    const children = objectShape(cells, options)
+    if (children === undefined) {
+      return undefined
+    }
+    field.children = children
+  }
+
   return fields
+}
+
+function leafPaths(fields, prefix = []) {
+  return fields.flatMap((field) => {
+    const path = [...prefix, field.key]
+    return field.children === undefined ? [path] : leafPaths(field.children, path)
+  })
+}
+
+function valueAtPath(value, path) {
+  let cursor = value
+  for (const segment of path) {
+    cursor = cursor[segment]
+  }
+  return cursor
+}
+
+function headerFieldText(field) {
+  if (field.children === undefined) {
+    return canonicalKey(field.key)
+  }
+  return `${canonicalKey(field.key)}{${field.children.map(headerFieldText).join(DOCUMENT_DELIMITER)}}`
 }
