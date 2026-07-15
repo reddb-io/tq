@@ -37,6 +37,13 @@ impl Default for ParseOptions {
     }
 }
 
+/// Encoder options. Defaults preserve the canonical v3 output profile.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EncodeOptions {
+    /// Emit recursive-brace tabular headers for uniform nested object fields.
+    pub nested_tabular_headers: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Document {
     fields: Vec<Field>,
@@ -270,8 +277,12 @@ impl Document {
     }
 
     pub fn to_canonical_toon(&self) -> String {
+        self.to_toon_with_options(EncodeOptions::default())
+    }
+
+    pub fn to_toon_with_options(&self, options: EncodeOptions) -> String {
         let mut output = String::new();
-        self.write_fields(&mut output, 0);
+        self.write_fields(&mut output, 0, options);
         output
     }
 
@@ -283,10 +294,10 @@ impl Document {
         serde_json::Value::Object(map)
     }
 
-    fn write_fields(&self, output: &mut String, depth: usize) {
+    fn write_fields(&self, output: &mut String, depth: usize, options: EncodeOptions) {
         for field in &self.fields {
             write_indent(output, depth);
-            write_field(output, &field.key, &field.value, depth);
+            write_field(output, &field.key, &field.value, depth, options);
         }
     }
 }
@@ -389,10 +400,16 @@ impl Value {
     }
 
     pub fn to_canonical_toon(&self) -> String {
+        self.to_toon_with_options(EncodeOptions::default())
+    }
+
+    pub fn to_toon_with_options(&self, options: EncodeOptions) -> String {
         let mut output = String::new();
         match self {
-            Self::Array(array) => write_array(&mut output, None, &array.values(), 0, false),
-            Self::Object(document) => document.write_fields(&mut output, 0),
+            Self::Array(array) => {
+                write_array(&mut output, None, &array.values(), 0, false, options)
+            }
+            Self::Object(document) => document.write_fields(&mut output, 0, options),
             value => output.push_str(&primitive_text(value, DOCUMENT_DELIMITER)),
         }
         output
@@ -1494,8 +1511,12 @@ impl Array {
     }
 
     pub fn to_canonical_toon(&self) -> String {
+        self.to_toon_with_options(EncodeOptions::default())
+    }
+
+    pub fn to_toon_with_options(&self, options: EncodeOptions) -> String {
         let mut output = String::new();
-        write_array(&mut output, None, &self.values(), 0, false);
+        write_array(&mut output, None, &self.values(), 0, false, options);
         output
     }
 
@@ -2861,13 +2882,21 @@ fn write_indent(output: &mut String, depth: usize) {
 }
 
 /// Writes `key: value` at the caller's cursor (indent or `- ` already emitted).
-fn write_field(output: &mut String, key: &str, value: &Value, depth: usize) {
+fn write_field(
+    output: &mut String,
+    key: &str,
+    value: &Value,
+    depth: usize,
+    options: EncodeOptions,
+) {
     match value {
-        Value::Array(array) => write_array(output, Some(key), &array.values(), depth, false),
+        Value::Array(array) => {
+            write_array(output, Some(key), &array.values(), depth, false, options)
+        }
         Value::Object(document) => {
             output.push_str(&canonical_key(key));
             output.push_str(":\n");
-            document.write_fields(output, depth + 1);
+            document.write_fields(output, depth + 1, options);
         }
         value => {
             output.push_str(&canonical_key(key));
@@ -2886,6 +2915,7 @@ fn write_array(
     values: &[Value],
     depth: usize,
     list_item: bool,
+    options: EncodeOptions,
 ) {
     if values.is_empty() {
         match key {
@@ -2913,18 +2943,19 @@ fn write_array(
 
     // In list-item position the tabular form has nowhere to put its field list,
     // so §9.4 requires the expanded list even for a uniform array of objects.
-    if let Some(fields) = tabular_fields(values).filter(|_| !list_item) {
-        write_array_header(output, key, values.len(), Some(&fields));
+    if let Some(shape) = tabular_shape(values, options).filter(|_| !list_item) {
+        write_array_header(output, key, values.len(), Some(&shape.fields));
         output.push('\n');
         for value in values {
-            let Value::Object(document) = value else {
+            let Value::Object(_) = value else {
                 unreachable!("tabular_fields only matches objects");
             };
             write_indent(output, depth + 1);
-            let cells = fields
+            let cells = shape
+                .paths
                 .iter()
-                .map(|field| {
-                    let cell = document.get(field).expect("tabular_fields checked the key");
+                .map(|path| {
+                    let cell = value_at_path(value, path).expect("tabular_shape checked the path");
                     primitive_text(cell, DOCUMENT_DELIMITER)
                 })
                 .collect::<Vec<_>>();
@@ -2938,25 +2969,25 @@ fn write_array(
     output.push('\n');
     for value in values {
         write_indent(output, depth + 1);
-        write_list_item(output, value, depth + 1);
+        write_list_item(output, value, depth + 1, options);
     }
 }
 
-fn write_list_item(output: &mut String, value: &Value, depth: usize) {
+fn write_list_item(output: &mut String, value: &Value, depth: usize, options: EncodeOptions) {
     match value {
         Value::Object(document) if document.fields.is_empty() => output.push_str("-\n"),
         Value::Object(document) => {
             output.push_str("- ");
             let first = &document.fields[0];
-            write_field(output, &first.key, &first.value, depth + 1);
+            write_field(output, &first.key, &first.value, depth + 1, options);
             for field in &document.fields[1..] {
                 write_indent(output, depth + 1);
-                write_field(output, &field.key, &field.value, depth + 1);
+                write_field(output, &field.key, &field.value, depth + 1, options);
             }
         }
         Value::Array(array) => {
             output.push_str("- ");
-            write_array(output, None, &array.values(), depth, true);
+            write_array(output, None, &array.values(), depth, true, options);
         }
         value => {
             output.push_str("- ");
@@ -2970,7 +3001,7 @@ fn write_array_header(
     output: &mut String,
     key: Option<&str>,
     len: usize,
-    fields: Option<&[String]>,
+    fields: Option<&[HeaderFieldShape]>,
 ) {
     if let Some(key) = key {
         output.push_str(&canonical_key(key));
@@ -2980,29 +3011,59 @@ fn write_array_header(
     output.push(']');
     if let Some(fields) = fields {
         output.push('{');
-        let names = fields
-            .iter()
-            .map(|field| canonical_key(field))
-            .collect::<Vec<_>>();
+        let names = fields.iter().map(header_field_text).collect::<Vec<_>>();
         output.push_str(&names.join(&DOCUMENT_DELIMITER.to_string()));
         output.push('}');
     }
     output.push(':');
 }
 
-/// Tabular eligibility (§9.3): every element is a non-empty object, all share the
-/// first element's key set, and every value is primitive.
-fn tabular_fields(values: &[Value]) -> Option<Vec<String>> {
+fn header_field_text(field: &HeaderFieldShape) -> String {
+    if field.children.is_empty() {
+        return canonical_key(&field.key);
+    }
+    let children = field
+        .children
+        .iter()
+        .map(header_field_text)
+        .collect::<Vec<_>>()
+        .join(&DOCUMENT_DELIMITER.to_string());
+    format!("{}{{{children}}}", canonical_key(&field.key))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TabularShape {
+    fields: Vec<HeaderFieldShape>,
+    paths: Vec<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HeaderFieldShape {
+    key: String,
+    children: Vec<HeaderFieldShape>,
+}
+
+fn tabular_shape(values: &[Value], options: EncodeOptions) -> Option<TabularShape> {
+    let fields = object_shape(values, options)?;
+    let mut paths = Vec::new();
+    collect_leaf_paths(&fields, &mut Vec::new(), &mut paths);
+    Some(TabularShape { fields, paths })
+}
+
+fn object_shape(values: &[Value], options: EncodeOptions) -> Option<Vec<HeaderFieldShape>> {
     let Value::Object(first) = values.first()? else {
         return None;
     };
     if first.fields.is_empty() {
         return None;
     }
-    let fields = first
+    let mut fields = first
         .fields
         .iter()
-        .map(|field| field.key.clone())
+        .map(|field| HeaderFieldShape {
+            key: field.key.clone(),
+            children: Vec::new(),
+        })
         .collect::<Vec<_>>();
 
     for value in values {
@@ -3012,19 +3073,64 @@ fn tabular_fields(values: &[Value]) -> Option<Vec<String>> {
         if document.fields.len() != fields.len() {
             return None;
         }
-        if document
-            .fields
+        if fields
             .iter()
-            .any(|field| !field.value.is_primitive())
+            .any(|field| document.get(&field.key).is_none())
         {
-            return None;
-        }
-        if fields.iter().any(|field| document.get(field).is_none()) {
             return None;
         }
     }
 
+    for field in &mut fields {
+        let cells = values
+            .iter()
+            .map(|value| {
+                let Value::Object(document) = value else {
+                    unreachable!("shape check already matched objects");
+                };
+                document
+                    .get(&field.key)
+                    .expect("shape check already matched keys")
+                    .clone()
+            })
+            .collect::<Vec<_>>();
+        if cells.iter().all(Value::is_primitive) {
+            continue;
+        }
+        if !options.nested_tabular_headers {
+            return None;
+        }
+        field.children = object_shape(&cells, options)?;
+    }
+
     Some(fields)
+}
+
+fn collect_leaf_paths(
+    fields: &[HeaderFieldShape],
+    prefix: &mut Vec<String>,
+    paths: &mut Vec<Vec<String>>,
+) {
+    for field in fields {
+        prefix.push(field.key.clone());
+        if field.children.is_empty() {
+            paths.push(prefix.clone());
+        } else {
+            collect_leaf_paths(&field.children, prefix, paths);
+        }
+        prefix.pop();
+    }
+}
+
+fn value_at_path<'a>(value: &'a Value, path: &[String]) -> Option<&'a Value> {
+    let mut cursor = value;
+    for segment in path {
+        let Value::Object(document) = cursor else {
+            return None;
+        };
+        cursor = document.get(segment)?;
+    }
+    Some(cursor)
 }
 
 fn primitive_text(value: &Value, delimiter: char) -> String {
@@ -3121,7 +3227,7 @@ fn tabular_row_decode_count_for_tests() -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{Document, Value};
+    use super::{Document, EncodeOptions, Value};
 
     #[test]
     fn parses_flat_fields_and_serializes_canonical_toon() {
@@ -3198,6 +3304,47 @@ mod tests {
                     { "id": 2, "customer": { "name": "Bob", "country": "US" }, "total": 20 }
                 ]
             })
+        );
+    }
+
+    #[test]
+    fn serializes_nested_tabular_headers_only_when_opted_in() {
+        let document = Value::from_json_value(serde_json::json!({
+            "orders": [
+                { "id": 1, "customer": { "name": "Ada", "country": "UK" }, "total": 10.5 },
+                { "id": 2, "customer": { "name": "Bob", "country": "US" }, "total": 20 }
+            ]
+        }));
+        let expanded =
+            "orders[2]:\n  - id: 1\n    customer:\n      name: Ada\n      country: UK\n    total: 10.5\n  - id: 2\n    customer:\n      name: Bob\n      country: US\n    total: 20\n";
+        let nested =
+            "orders[2]{id,customer{name,country},total}:\n  1,Ada,UK,10.5\n  2,Bob,US,20\n";
+        let options = EncodeOptions {
+            nested_tabular_headers: true,
+        };
+
+        assert_eq!(document.to_canonical_toon(), expanded);
+        assert_eq!(document.to_toon_with_options(options), nested);
+        assert_eq!(
+            Value::parse_toon(nested).unwrap().to_json_value(),
+            document.to_json_value()
+        );
+    }
+
+    #[test]
+    fn nested_tabular_serialization_falls_back_on_recursive_shape_mismatch() {
+        let document = Value::from_json_value(serde_json::json!({
+            "rows": [
+                { "id": 1, "point": { "x": 1, "y": 2 } },
+                { "id": 2, "point": { "x": 3, "z": 4 } }
+            ]
+        }));
+
+        assert_eq!(
+            document.to_toon_with_options(EncodeOptions {
+                nested_tabular_headers: true,
+            }),
+            "rows[2]:\n  - id: 1\n    point:\n      x: 1\n      y: 2\n  - id: 2\n    point:\n      x: 3\n      z: 4\n"
         );
     }
 
