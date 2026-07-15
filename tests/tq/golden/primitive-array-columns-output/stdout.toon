@@ -1,0 +1,4 @@
+items[3|]{id|tags[;]|quantity}:
+  item_001|hazmat;oversize|60
+  item_002||0
+  item_003|"frag;ile";null;true;"core|blue"|7
