@@ -3,7 +3,7 @@
 
 use reddb_io_toon::{
     close_transform_stream, encode_toonl_values, jsonl_to_toonl, toonl_to_jsonl, Array, Document,
-    ParseOptions, ToonlReader, ToonlWriter, Value,
+    ParseOptions, ToonlEncoder, ToonlReader, ToonlWriter, Value,
 };
 use serde_json::json;
 
@@ -172,6 +172,71 @@ fn toonl_reader_and_writer_stream_rows_with_schema_rotation() {
     assert_eq!(
         String::from_utf8(output).unwrap(),
         String::from_utf8(input.to_vec()).unwrap()
+    );
+}
+
+#[test]
+fn toonl_streaming_reader_accepts_matching_continuation_headers() {
+    let input = b"[]{id,name}:\n1,Ada\n[~]{id,name}:\n2,Linus\n[=2]\n";
+    let rows = ToonlReader::new(lines(input))
+        .collect::<Result<Vec<_>, _>>()
+        .expect("valid TOONL rows");
+
+    assert_eq!(
+        rows.iter()
+            .map(Value::to_json_value)
+            .collect::<Vec<serde_json::Value>>(),
+        vec![
+            json!({"id": 1, "name": "Ada"}),
+            json!({"id": 2, "name": "Linus"})
+        ]
+    );
+
+    let mismatch = b"[]{id,name}:\n1,Ada\n[~]{id,role}:\n2,dev\n";
+    let error = ToonlReader::new(lines(mismatch))
+        .collect::<Result<Vec<_>, _>>()
+        .expect_err("mismatched continuation is rejected")
+        .to_string();
+    assert!(error.contains("continuation header mismatch"));
+}
+
+#[test]
+fn toonl_encoders_emit_continuation_headers_only_when_configured() {
+    let rows = [
+        Value::from_json_str(r#"{"id":1,"name":"Ada"}"#).expect("row"),
+        Value::from_json_str(r#"{"id":2,"name":"Linus"}"#).expect("row"),
+        Value::from_json_str(r#"{"id":3,"name":"Grace"}"#).expect("row"),
+    ];
+
+    assert_eq!(
+        encode_toonl_values(&rows).expect("default output"),
+        "[]{id,name}:\n1,Ada\n2,Linus\n3,Grace\n[=3]\n"
+    );
+
+    let mut encoder = ToonlEncoder::new(',', &["id", "name"]).expect("encoder");
+    encoder
+        .set_continuation_every_rows(Some(2))
+        .expect("row cadence");
+    for row in [["1", "Ada"], ["2", "Linus"], ["3", "Grace"]] {
+        encoder.push_raw_row(&row).expect("row");
+    }
+    assert_eq!(
+        encoder.finish(),
+        "[]{id,name}:\n1,Ada\n2,Linus\n[~]{id,name}:\n3,Grace\n[=3]\n"
+    );
+
+    let mut output = Vec::new();
+    let mut writer = ToonlWriter::new(&mut output);
+    writer
+        .set_continuation_every_rows(Some(2))
+        .expect("row cadence");
+    for row in &rows {
+        writer.write_record(row).expect("write row");
+    }
+    writer.finish().expect("finish writer");
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        "[]{id,name}:\n1,Ada\n2,Linus\n[~]{id,name}:\n3,Grace\n[=3]\n"
     );
 }
 
