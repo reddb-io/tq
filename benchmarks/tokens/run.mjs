@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync, mkdirSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { readFileSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { countTokens } from 'gpt-tokenizer'
@@ -8,6 +8,7 @@ import { encodeRecords, serialize } from '../../packages/toon/src/index.js'
 
 const REPO_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
 const RESULTS_DIR = join(REPO_ROOT, 'benchmarks', 'results')
+const DATASETS_DIR = join(REPO_ROOT, 'benchmarks', 'datasets')
 const REPORT_PATH = join(RESULTS_DIR, '2026-07-15-token-efficiency.md')
 const EXTENSIONS = {
   'toon-ext-primitive-array-columns': { primitiveArrayColumns: true },
@@ -37,88 +38,55 @@ function pct(value, base) {
   return `${(((value - base) / base) * 100).toFixed(1)}%`
 }
 
-function mulberry32(seed) {
-  let state = seed >>> 0
-  return () => {
-    state += 0x6d2b79f5
-    let t = state
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
+function representativeDatasets() {
+  const files = datasetFiles(DATASETS_DIR)
+  return files.map((file) => {
+    const value = JSON.parse(readFileSync(file, 'utf8'))
+    const parts = relative(DATASETS_DIR, file).split('/')
+    const shapeClass = parts[0]
+    const name = parts.join('/').replace(/\.json$/, '')
+    return {
+      name,
+      section: 'representative',
+      shapeClass,
+      value,
+      records: firstRecordArray(value),
+    }
+  })
 }
 
-function pick(random, values) {
-  return values[Math.floor(random() * values.length)]
-}
-
-function upstreamDatasets() {
-  const random = mulberry32(0x129a1)
-  const repos = Array.from({ length: 120 }, (_, index) => ({
-    id: index + 1,
-    owner: pick(random, ['reddb-io', 'toon-format', 'example', 'infra']),
-    name: `repo-${String(index + 1).padStart(3, '0')}`,
-    language: pick(random, ['TypeScript', 'Rust', 'Python', 'Go']),
-    stars: Math.floor(random() * 50000),
-    archived: random() > 0.94,
-  }))
-  const analytics = Array.from({ length: 240 }, (_, index) => ({
-    ts: `2026-07-${String((index % 14) + 1).padStart(2, '0')}T${String(index % 24).padStart(2, '0')}:00:00Z`,
-    path: pick(random, ['/docs', '/install', '/pricing', '/benchmarks']),
-    country: pick(random, ['BR', 'US', 'DE', 'JP']),
-    visitors: Math.floor(25 + random() * 900),
-    conversions: Math.floor(random() * 40),
-  }))
-  const orders = Array.from({ length: 180 }, (_, index) => ({
-    id: `ord_${String(index + 1).padStart(5, '0')}`,
-    status: pick(random, ['paid', 'packed', 'shipped', 'refunded']),
-    total: Number((15 + random() * 400).toFixed(2)),
-    tags: [pick(random, ['new', 'vip', 'gift']), pick(random, ['fragile', 'bulk', 'standard'])],
-    lines: [
-      { sku: `sku_${index % 17}`, qty: 1 + (index % 4), price: Number((5 + random() * 90).toFixed(2)) },
-      { sku: `sku_${(index + 9) % 17}`, qty: 1 + (index % 2), price: Number((5 + random() * 90).toFixed(2)) },
-    ],
-  }))
-  const logs = Array.from({ length: 300 }, (_, index) => ({
-    ts: `2026-07-15T16:${String(index % 60).padStart(2, '0')}:00Z`,
-    level: pick(random, ['debug', 'info', 'warn', 'error']),
-    service: pick(random, ['api', 'worker', 'scheduler']),
-    msg: pick(random, ['started', 'claimed job', 'retrying', 'completed']),
-    request_id: `req_${String(index + 1).padStart(6, '0')}`,
-  }))
-
-  const orderSummaries = orders.map(({ id, status, total, tags }) => ({
-    id,
-    status,
-    total,
-    tag1: tags[0],
-    tag2: tags[1],
-  }))
-
-  return [
-    { name: 'upstream-github-repos', value: { repos }, records: repos },
-    { name: 'upstream-analytics', value: { analytics }, records: analytics },
-    { name: 'upstream-orders', value: { orders }, records: orderSummaries },
-    { name: 'streaming-logs', value: { logs }, records: logs },
-  ]
+function datasetFiles(dir) {
+  return readdirSync(dir)
+    .flatMap((entry) => {
+      const path = join(dir, entry)
+      if (statSync(path).isDirectory()) return datasetFiles(path)
+      return path.endsWith('.json') ? [path] : []
+    })
+    .sort()
 }
 
 function localDatasets() {
   const wire = JSON.parse(readFileSync(join(REPO_ROOT, 'tests/corpus/wire-efficiency/corpora.json'), 'utf8'))
   const datasets = wire.cases.map((testCase) => ({
     name: `wire-${testCase.name}`,
+    section: 'extension-eligibility showcase',
+    shapeClass: 'wire-showcase',
     value: testCase.value,
     records: firstRecordArray(testCase.value),
   }))
   const primitive = JSON.parse(readFileSync(join(REPO_ROOT, 'tests/corpus/wire-efficiency/primitive-array-columns.json'), 'utf8'))
   datasets.push(...primitive.cases.map((testCase) => ({
     name: `wire-extension-${slug(testCase.name)}`,
+    section: 'extension-eligibility showcase',
+    shapeClass: 'wire-showcase',
     value: testCase.expected,
     records: firstRecordArray(testCase.expected),
   })))
   const objectArray = JSON.parse(readFileSync(join(REPO_ROOT, 'tests/corpus/wire-efficiency/object-array-columns.json'), 'utf8'))
   datasets.push(...objectArray.cases.map((testCase) => ({
     name: `wire-extension-${slug(testCase.name)}`,
+    section: 'extension-eligibility showcase',
+    shapeClass: 'wire-showcase',
     value: testCase.expected,
     records: firstRecordArray(testCase.expected),
   })))
@@ -211,6 +179,10 @@ function formatsFor(dataset) {
 
 function renderReport(rows) {
   const command = 'pnpm benchmark:tokens'
+  const representativeRows = rows.filter((row) => row.section === 'representative')
+  const showcaseRows = rows.filter((row) => row.section !== 'representative')
+  const byShape = summarizeByShape(representativeRows)
+  const losses = representativeRows.filter((row) => row.format.startsWith('toon') && row.deltaTokens > 0)
   const lines = [
     '# Token Efficiency Benchmark',
     '',
@@ -218,28 +190,101 @@ function renderReport(rows) {
     '',
     'Tokenizer: `o200k_base` via `gpt-tokenizer`.',
     '',
+    'Representative datasets are vendored under `benchmarks/datasets/` and are read offline. Wire fixtures are retained as an extension-eligibility showcase, not as representative payload evidence.',
+    '',
+    '## Representative Corpus by Shape',
+    '',
+    '| Shape | Datasets | Best TOON-family median vs JSON | Best non-TOON median vs JSON |',
+    '| --- | ---: | ---: | ---: |',
+  ]
+  for (const summary of byShape) {
+    lines.push(`| ${summary.shapeClass} | ${summary.datasets} | ${summary.bestToon} | ${summary.bestOther} |`)
+  }
+  lines.push(
+    '',
+    '## Explicit TOON/TOONL Losses',
+    '',
+    '| Shape | Dataset | Format | Tokens vs minified JSON |',
+    '| --- | --- | --- | ---: |',
+  )
+  if (losses.length === 0) {
+    lines.push('| n/a | n/a | n/a | n/a |')
+  } else {
+    for (const row of losses) {
+      lines.push(`| ${row.shapeClass} | ${row.dataset} | ${row.format} | ${row.vsJson} |`)
+    }
+  }
+  lines.push(
+    '',
+    '## Representative Dataset Measurements',
+    '',
+    '| Shape | Dataset | Format | Bytes | Tokens | Tokens vs minified JSON |',
+    '| --- | --- | --- | ---: | ---: | ---: |',
+  )
+  for (const row of representativeRows) {
+    lines.push(`| ${row.shapeClass} | ${row.dataset} | ${row.format} | ${row.bytes} | ${row.tokens} | ${row.vsJson} |`)
+  }
+  lines.push(
+    '',
+    '## Wire Extension-Eligibility Showcase',
+    '',
+    'These `wire-*` fixtures exercise opt-in extension behavior and edge cases. They are not representative corpus evidence.',
+    '',
     '| Dataset | Format | Bytes | Tokens | Tokens vs minified JSON |',
     '| --- | --- | ---: | ---: | ---: |',
-  ]
-  for (const row of rows) {
+  )
+  for (const row of showcaseRows) {
     lines.push(`| ${row.dataset} | ${row.format} | ${row.bytes} | ${row.tokens} | ${row.vsJson} |`)
   }
   lines.push('')
   return `${lines.join('\n')}\n`
 }
 
-const datasets = [...upstreamDatasets(), ...localDatasets()]
+function summarizeByShape(rows) {
+  const shapeClasses = [...new Set(rows.map((row) => row.shapeClass))].sort()
+  return shapeClasses.map((shapeClass) => {
+    const shapeRows = rows.filter((row) => row.shapeClass === shapeClass)
+    const datasets = new Set(shapeRows.map((row) => row.dataset)).size
+    const toonRows = shapeRows.filter((row) => row.format.startsWith('toon'))
+    const otherRows = shapeRows.filter((row) => !row.format.startsWith('toon') && row.format !== 'json-minified')
+    return {
+      shapeClass,
+      datasets,
+      bestToon: bestMedian(toonRows),
+      bestOther: bestMedian(otherRows),
+    }
+  })
+}
+
+function bestMedian(rows) {
+  const formats = [...new Set(rows.map((row) => row.format))].sort()
+  let best = null
+  for (const format of formats) {
+    const deltas = rows.filter((row) => row.format === format).map((row) => row.deltaTokens).sort((left, right) => left - right)
+    if (deltas.length === 0) continue
+    const middle = Math.floor(deltas.length / 2)
+    const median = deltas.length % 2 === 0 ? (deltas[middle - 1] + deltas[middle]) / 2 : deltas[middle]
+    if (!best || median < best.median) best = { format, median }
+  }
+  return best ? `${best.format} (${best.median.toFixed(1)}%)` : 'n/a'
+}
+
+const datasets = [...representativeDatasets(), ...localDatasets()]
 const rows = []
 for (const dataset of datasets) {
   const formats = formatsFor(dataset)
   const jsonTokens = metric(formats.get('json-minified')).tokens
   for (const [format, text] of formats) {
     const counts = metric(text)
+    const deltaTokens = ((counts.tokens - jsonTokens) / jsonTokens) * 100
     rows.push({
       dataset: dataset.name,
+      section: dataset.section,
+      shapeClass: dataset.shapeClass,
       format,
       bytes: counts.bytes,
       tokens: counts.tokens,
+      deltaTokens,
       vsJson: pct(counts.tokens, jsonTokens),
     })
   }

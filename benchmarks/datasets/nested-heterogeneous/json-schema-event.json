@@ -1,0 +1,76 @@
+{
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "AuditEvent",
+    "type": "object",
+    "required": ["id", "actor", "action", "target", "occurred_at"],
+    "properties": {
+      "id": { "type": "string", "pattern": "^evt_[a-z0-9]+$" },
+      "actor": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["kind", "user_id", "email"],
+            "properties": {
+              "kind": { "const": "user" },
+              "user_id": { "type": "string" },
+              "email": { "type": "string", "format": "email" }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["kind", "service", "scope"],
+            "properties": {
+              "kind": { "const": "service" },
+              "service": { "type": "string" },
+              "scope": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        ]
+      },
+      "action": { "enum": ["created", "updated", "deleted", "exported"] },
+      "target": {
+        "type": "object",
+        "properties": {
+          "resource": { "type": "string" },
+          "id": { "type": "string" },
+          "labels": { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      },
+      "occurred_at": { "type": "string", "format": "date-time" },
+      "diff": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["path", "before", "after"],
+          "properties": {
+            "path": { "type": "string" },
+            "before": {},
+            "after": {}
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "id": "evt_a1",
+      "actor": { "kind": "user", "user_id": "u_100", "email": "ops@example.invalid" },
+      "action": "updated",
+      "target": { "resource": "project", "id": "proj_red", "labels": { "tier": "prod", "region": "br" } },
+      "occurred_at": "2026-07-15T12:15:00Z",
+      "diff": [
+        { "path": "/status", "before": "staging", "after": "active" },
+        { "path": "/limits/seats", "before": 12, "after": 20 }
+      ]
+    },
+    {
+      "id": "evt_b2",
+      "actor": { "kind": "service", "service": "scheduler", "scope": ["jobs:write", "audit:append"] },
+      "action": "exported",
+      "target": { "resource": "report", "id": "rpt_2026_07", "labels": { "format": "csv" } },
+      "occurred_at": "2026-07-15T13:00:00Z",
+      "diff": []
+    }
+  ]
+}

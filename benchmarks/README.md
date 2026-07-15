@@ -21,9 +21,11 @@ Run:
 pnpm benchmark:tokens
 ```
 
-The deterministic harness generates upstream-style `github`, `analytics`,
-`orders`, and streaming `logs` datasets, then adds this repository's corpora from
-`tests/corpus/wire-efficiency/` and TOONL fixtures from `tests/corpus/toonl/`.
+The deterministic harness reads representative offline fixtures from
+`benchmarks/datasets/`, organized by shape class and documented in
+`benchmarks/datasets/MANIFEST.md`. It also measures this repository's corpora
+from `tests/corpus/wire-efficiency/` as extension-eligibility showcase fixtures,
+not as representative payload evidence.
 It compares:
 
 - minified JSON
