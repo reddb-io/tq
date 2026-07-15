@@ -3091,7 +3091,10 @@ fn parse_array_header_field_tree(
     source: &str,
     delimiter: char,
 ) -> Result<Vec<HeaderFieldTree>, HeaderError> {
-    if delimiter != DOCUMENT_DELIMITER && source.contains(DOCUMENT_DELIMITER) {
+    if delimiter != DOCUMENT_DELIMITER
+        && source.contains(DOCUMENT_DELIMITER)
+        && (source.contains('[') || source.contains('{'))
+    {
         return parse_header_field_tree(source, DOCUMENT_DELIMITER, delimiter);
     }
     match parse_header_field_tree(source, delimiter, delimiter) {
