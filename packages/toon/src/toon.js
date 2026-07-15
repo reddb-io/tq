@@ -1051,7 +1051,11 @@ function parseHeaderFields(source, delimiter, activeDelimiter) {
 }
 
 function parseArrayHeaderFieldTree(source, delimiter) {
-  if (delimiter !== DOCUMENT_DELIMITER && source.includes(DOCUMENT_DELIMITER)) {
+  if (
+    delimiter !== DOCUMENT_DELIMITER &&
+    source.includes(DOCUMENT_DELIMITER) &&
+    (source.includes('[') || source.includes('{'))
+  ) {
     return parseHeaderFieldTree(source, DOCUMENT_DELIMITER, delimiter)
   }
   try {
