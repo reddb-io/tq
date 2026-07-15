@@ -159,6 +159,10 @@ export interface EncodeLinesOptions extends ToonlContinuationOptions {
 export interface ToonlLineEmitter {
   /** Appends a record and returns the text to write. */
   push(record: ToonlRecord): string
+  /** Declares or rotates a tagged lane and returns the declaration text. */
+  declareLane(tag: string, fields: readonly string[]): string
+  /** Appends a record to a tagged lane, declaring or rotating it as needed. */
+  pushTagged(tag: string, record: ToonlRecord): string
   /** Closes the last segment and returns the text to write. */
   end(): string
 }
