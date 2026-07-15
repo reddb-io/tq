@@ -145,11 +145,14 @@ test('official TOON spec fixtures all pass', () => {
   assert.ok(executed >= 380, `expected the full spec corpus, ran only ${executed} cases`)
 })
 
-test('TOONL v0.1 fixtures are executable spec examples', () => {
+test('TOONL fixtures are executable spec examples', () => {
   let executed = 0
 
   for (const { fixture } of readFixtures(TOONL_FIXTURE_ROOT)) {
-    assert.equal(fixture.version, 'toonl-v0.1', 'fixture declares the TOONL spec version')
+    assert.ok(
+      ['toonl-v0.1', 'toonl-v0.2'].includes(fixture.version),
+      `fixture declares a supported TOONL spec version, got ${JSON.stringify(fixture.version)}`,
+    )
     assert.equal(fixture.extension, '.toonl', 'fixture declares the canonical extension')
     assert.equal(fixture.mediaHint, 'application/toonl', 'fixture declares the media hint')
 
@@ -164,6 +167,9 @@ test('TOONL v0.1 fixtures are executable spec examples', () => {
 
       if (testCase.kind === 'encode') {
         const encoder = new ToonlEncoder(testCase.delimiter ?? ',', testCase.fields)
+        if (testCase.continuationEveryRows !== undefined) {
+          encoder.setContinuationEveryRows(testCase.continuationEveryRows)
+        }
         for (const row of testCase.rows) {
           encoder.pushRawRow(row)
         }
@@ -194,9 +200,43 @@ test('TOONL v0.1 fixtures are executable spec examples', () => {
         continue
       }
 
+      if (testCase.kind === 'v0.1-error') {
+        assert.throws(
+          () => rejectV01Toonl(testCase.input),
+          (error) => error.message.includes(testCase.expectedError),
+          `${name}: expected v0.1 error containing ${JSON.stringify(testCase.expectedError)}`,
+        )
+        continue
+      }
+
       assert.fail(`${name}: unknown TOONL fixture kind ${testCase.kind}`)
     }
   }
 
   assert.ok(executed >= 14, `expected the TOONL corpus, ran only ${executed} cases`)
 })
+
+function rejectV01Toonl(input) {
+  input.split(/\n/).forEach((rawLine, index) => {
+    const lineNumber = index + 1
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
+    if (line === '' || !line.startsWith('[')) {
+      return
+    }
+    const close = line.indexOf(']')
+    if (close === -1) {
+      throw new Error(`line ${lineNumber}: invalid header`)
+    }
+    const bracket = line.slice(1, close)
+    if (bracket.startsWith('=')) {
+      return
+    }
+    if (!['', '|', '\t'].includes(bracket)) {
+      throw new Error(`line ${lineNumber}: invalid header delimiter`)
+    }
+    const suffix = line.slice(close + 1)
+    if (!suffix.startsWith('{') || !suffix.endsWith('}:')) {
+      throw new Error(`line ${lineNumber}: invalid header`)
+    }
+  })
+}

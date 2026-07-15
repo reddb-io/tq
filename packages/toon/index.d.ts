@@ -111,7 +111,14 @@ export function decodeLines(
   source: string | Iterable<string | Uint8Array> | AsyncIterable<string | Uint8Array>,
 ): AsyncGenerator<ToonlRecord, void, undefined>
 
-export interface EncodeLinesOptions {
+export interface ToonlContinuationOptions {
+  /** Emit a continuation header before the next row after this many rows. */
+  continuationEveryRows?: number
+  /** Emit a continuation header before the next row after this many row bytes. */
+  continuationEveryBytes?: number
+}
+
+export interface EncodeLinesOptions extends ToonlContinuationOptions {
   /** Header delimiter. Default `','`. */
   delimiter?: ToonlDelimiter
   /** Write a `[=N]` trailer when a segment closes. Default `true`. */
@@ -166,9 +173,17 @@ export function recordTransform(
 
 /** A single TOONL segment with a fixed schema, closed by its `[=N]` trailer. */
 export class ToonlEncoder {
-  constructor(delimiter: ToonlDelimiter, fields: readonly string[])
+  constructor(
+    delimiter: ToonlDelimiter,
+    fields: readonly string[],
+    options?: ToonlContinuationOptions,
+  )
   readonly fields: string[]
   readonly rowCount: number
+  /** Configures row-based continuation header cadence. */
+  setContinuationEveryRows(rows: number | undefined): void
+  /** Configures byte-based continuation header cadence. */
+  setContinuationEveryBytes(bytes: number | undefined): void
   /** Appends already-encoded cells. */
   pushRawRow(cells: readonly string[]): void
   /** Appends a record carrying exactly this segment's fields. */
