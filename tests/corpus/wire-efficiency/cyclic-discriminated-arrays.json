@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "generator": "scripts/cyclic_discriminated_arrays_prototype.mjs",
+  "cases": [
+    {
+      "name": "three-event-cycle-with-common-prefix",
+      "input": "@toon-cyclic-discriminated-array/1\n@root {\"events\":\"$C0\"}\n@array $C0 discr=type n=12 common=tenant,seq order=cycle(login,purchase,logout)*4\n@common\n\"acme\"\t1\n\"acme\"\t2\n\"acme\"\t3\n\"acme\"\t4\n\"acme\"\t5\n\"acme\"\t6\n\"acme\"\t7\n\"acme\"\t8\n\"acme\"\t9\n\"acme\"\t10\n\"acme\"\t11\n\"acme\"\t12\n@group login n=4\n{\"actor\":\"u1\",\"ok\":true}\n{\"actor\":\"u2\",\"ok\":true}\n{\"actor\":\"u3\",\"ok\":false}\n{\"actor\":\"u4\",\"ok\":true}\n@group purchase n=4\n{\"actor\":\"u1\",\"amount\":12.5,\"currency\":\"USD\"}\n{\"actor\":\"u2\",\"amount\":4,\"currency\":\"EUR\"}\n{\"actor\":\"u3\",\"amount\":99.95,\"currency\":\"USD\"}\n{\"actor\":\"u4\",\"amount\":1.25,\"currency\":\"BRL\"}\n@group logout n=4\n{\"actor\":\"u1\",\"durationMs\":1200}\n{\"actor\":\"u2\",\"durationMs\":900}\n{\"actor\":\"u3\",\"durationMs\":1800}\n{\"actor\":\"u4\",\"durationMs\":600}\n@end\n",
+      "expected": {
+        "events": [
+          {
+            "type": "login",
+            "tenant": "acme",
+            "seq": 1,
+            "actor": "u1",
+            "ok": true
+          },
+          {
+            "type": "purchase",
+            "tenant": "acme",
+            "seq": 2,
+            "actor": "u1",
+            "amount": 12.5,
+            "currency": "USD"
+          },
+          {
+            "type": "logout",
+            "tenant": "acme",
+            "seq": 3,
+            "actor": "u1",
+            "durationMs": 1200
+          },
+          {
+            "type": "login",
+            "tenant": "acme",
+            "seq": 4,
+            "actor": "u2",
+            "ok": true
+          },
+          {
+            "type": "purchase",
+            "tenant": "acme",
+            "seq": 5,
+            "actor": "u2",
+            "amount": 4,
+            "currency": "EUR"
+          },
+          {
+            "type": "logout",
+            "tenant": "acme",
+            "seq": 6,
+            "actor": "u2",
+            "durationMs": 900
+          },
+          {
+            "type": "login",
+            "tenant": "acme",
+            "seq": 7,
+            "actor": "u3",
+            "ok": false
+          },
+          {
+            "type": "purchase",
+            "tenant": "acme",
+            "seq": 8,
+            "actor": "u3",
+            "amount": 99.95,
+            "currency": "USD"
+          },
+          {
+            "type": "logout",
+            "tenant": "acme",
+            "seq": 9,
+            "actor": "u3",
+            "durationMs": 1800
+          },
+          {
+            "type": "login",
+            "tenant": "acme",
+            "seq": 10,
+            "actor": "u4",
+            "ok": true
+          },
+          {
+            "type": "purchase",
+            "tenant": "acme",
+            "seq": 11,
+            "actor": "u4",
+            "amount": 1.25,
+            "currency": "BRL"
+          },
+          {
+            "type": "logout",
+            "tenant": "acme",
+            "seq": 12,
+            "actor": "u4",
+            "durationMs": 600
+          }
+        ]
+      },
+      "failClosedV3Strict": true
+    }
+  ],
+  "errors": [
+    {
+      "name": "declared-group-count-truncation",
+      "input": "@toon-cyclic-discriminated-array/1\n@root {\"events\":\"$C0\"}\n@array $C0 discr=type n=2 common= order=cycle(login,purchase)*1\n@group login n=2\n{\"actor\":\"u1\"}\n@end\n",
+      "line": 6,
+      "reason": "cyclic array group length mismatch"
+    },
+    {
+      "name": "declared-group-count-surplus",
+      "input": "@toon-cyclic-discriminated-array/1\n@root {\"events\":\"$C0\"}\n@array $C0 discr=type n=1 common= order=cycle(login)*1\n@group login n=1\n{\"actor\":\"u1\"}\n{\"actor\":\"u2\"}\n@end\n",
+      "line": 6,
+      "reason": "cyclic array group length mismatch"
+    }
+  ]
+}

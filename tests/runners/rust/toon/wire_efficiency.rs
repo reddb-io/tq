@@ -8,6 +8,8 @@ const PRIMITIVE_ARRAY_COLUMNS_FIXTURE: &str =
     "../../tests/corpus/wire-efficiency/primitive-array-columns.json";
 const OBJECT_ARRAY_COLUMNS_FIXTURE: &str =
     "../../tests/corpus/wire-efficiency/object-array-columns.json";
+const CYCLIC_DISCRIMINATED_ARRAYS_FIXTURE: &str =
+    "../../tests/corpus/wire-efficiency/cyclic-discriminated-arrays.json";
 const EXPECTED_CASE_COUNT: usize = 9;
 
 #[test]
@@ -224,6 +226,51 @@ fn object_array_column_corpus_decodes_identically_for_rust() {
 }
 
 #[test]
+fn cyclic_discriminated_array_corpus_decodes_identically_for_rust() {
+    let fixture = read_fixture(&fixture_path(CYCLIC_DISCRIMINATED_ARRAYS_FIXTURE));
+    assert_eq!(fixture.get("version").and_then(Json::as_u64), Some(1));
+
+    for test_case in fixture
+        .get("cases")
+        .and_then(Json::as_array)
+        .expect("cyclic discriminated-array cases")
+    {
+        let name = test_case.get("name").and_then(Json::as_str).unwrap();
+        let input = test_case.get("input").and_then(Json::as_str).unwrap();
+        let expected = test_case.get("expected").unwrap();
+        let decoded = Value::parse_toon(input)
+            .unwrap_or_else(|error| panic!("{name}: parse failed: {error}"))
+            .to_json_value();
+        assert_eq!(&decoded, expected, "{name}: decoded value");
+
+        if test_case.get("failClosedV3Strict").and_then(Json::as_bool) == Some(true) {
+            assert!(
+                reject_v3_strict(input).is_err(),
+                "{name}: strict v3 rejects extension form"
+            );
+        }
+    }
+
+    for test_case in fixture
+        .get("errors")
+        .and_then(Json::as_array)
+        .expect("cyclic discriminated-array errors")
+    {
+        let name = test_case.get("name").and_then(Json::as_str).unwrap();
+        let input = test_case.get("input").and_then(Json::as_str).unwrap();
+        let line = test_case.get("line").and_then(Json::as_u64).unwrap() as usize;
+        let reason = test_case.get("reason").and_then(Json::as_str).unwrap();
+        let error = match Value::parse_toon(input) {
+            Ok(_) => panic!("{name}: expected error"),
+            Err(error) => error,
+        };
+        assert_eq!(error.line(), line, "{name}: line");
+        assert_eq!(error.message(), reason, "{name}: reason");
+        assert_eq!(error.to_string(), format!("line {line}: {reason}"));
+    }
+}
+
+#[test]
 fn primitive_array_column_encoding_is_opt_in_and_falls_back_losslessly_for_rust() {
     let eligible = serde_json::json!({
         "items": [
@@ -390,6 +437,9 @@ fn encode_options(options: &Json) -> EncodeOptions {
 }
 
 fn reject_v3_strict(input: &str) -> Result<(), String> {
+    if input.starts_with("@toon-cyclic-discriminated-array/1\n") {
+        return Err("line 1: invalid root form".to_owned());
+    }
     for (index, line) in input.lines().enumerate() {
         let trimmed = line.trim_start();
         let Some(colon) = trimmed.find(':') else {
