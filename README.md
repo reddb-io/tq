@@ -464,7 +464,7 @@ users[3]{id,name,role}:
 
 `Value::from_json_str` / `Value::from_json_value` come in from the JSON side, `to_canonical_toon` and `to_json_string(compact)` go out, and `Document::parse` / `parse_with_options` give you the object model with the spec's decoder options.
 
-For TOONL, the crate exposes streaming APIs directly: `ToonlReader<R: BufRead>` iterates records in constant memory, `ToonlWriter<W: Write>` writes lazy headers with automatic schema rotation, and the bridge functions `jsonl_to_toonl`, `toonl_to_jsonl`, and `close_transform_stream` wire the common conversions without going through the CLI.
+For TOONL, the crate exposes streaming APIs directly: `ToonlReader<R: BufRead>` iterates records in constant memory, `ToonlWriter<W: Write>` writes lazy headers with automatic schema rotation, and the bridge functions `jsonl_to_toonl`, `toonl_to_jsonl`, `close_transform_stream`, and `close_transform_stream_interleaved` wire the common conversions without going through the CLI. The default close transform emits one TOON document per lane; the interleaved form emits one document per maximal row run.
 
 ---
 
@@ -501,10 +501,10 @@ users[3]{id,name,role}:
 
 `parse(input, options)` takes the spec's decoder options (`indent`, `strict`, `expandPaths`), `parseDocument` insists on an object root, and `serialize` writes the canonical default profile.
 
-TOONL is the streaming half: `encodeLines` emits an append-only stream, `decodeLines` reads it back a record at a time, and `closeTransform` turns each segment into one length-bearing TOON document. The Web Streams API surface (`ToonlDecodeStream`, `ToonlEncodeStream`, `JsonlToToonl`, `ToonlToJsonl`, and `recordTransform`) is universal across Node, Bun, Deno and browsers; in Node, use `Readable.toWeb()` / `Readable.fromWeb()` when crossing between Node streams and Web streams. The optional `@reddb-io/toon/node` subpath adds `readToonlFile(path)` and `writeToonlFile(path, records)` using only `node:fs` and `node:stream`.
+TOONL is the streaming half: `encodeLines` emits an append-only stream, `decodeLines` reads it back a record at a time, `closeTransform` turns each lane into length-bearing TOON documents, and `closeTransformInterleaved` preserves multiplexed row-run order for post-mortem rendering. The Web Streams API surface (`ToonlDecodeStream`, `ToonlEncodeStream`, `JsonlToToonl`, `ToonlToJsonl`, and `recordTransform`) is universal across Node, Bun, Deno and browsers; in Node, use `Readable.toWeb()` / `Readable.fromWeb()` when crossing between Node streams and Web streams. The optional `@reddb-io/toon/node` subpath adds `readToonlFile(path)` and `writeToonlFile(path, records)` using only `node:fs` and `node:stream`.
 
 ```js
-import { JsonlToToonl, ToonlToJsonl, closeTransform, decodeLines, encodeLines } from '@reddb-io/toon'
+import { JsonlToToonl, ToonlToJsonl, closeTransform, closeTransformInterleaved, decodeLines, encodeLines } from '@reddb-io/toon'
 
 // The header is written lazily with the first record, and a schema change
 // rotates the segment automatically.
