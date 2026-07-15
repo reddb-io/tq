@@ -1,0 +1,45 @@
+{
+  "category": "encode",
+  "tests": [
+    {
+      "name": "pipe delimiter encodes primitive arrays and quotes active delimiter cells",
+      "input": {
+        "tags": ["ops", "core|blue", "dev"]
+      },
+      "options": { "delimiter": "|" },
+      "expected": "tags[3|]: ops|\"core|blue\"|dev\n"
+    },
+    {
+      "name": "tab delimiter encodes tabular arrays and quotes active delimiter cells",
+      "input": {
+        "rows": [
+          { "id": 1, "label": "alpha\tone" },
+          { "id": 2, "label": "beta" }
+        ]
+      },
+      "options": { "delimiter": "\t" },
+      "expected": "rows[2\t]{id\tlabel}:\n  1\t\"alpha\\tone\"\n  2\tbeta\n"
+    },
+    {
+      "name": "pipe delimiter composes with nested tabular headers and keyed map collapse",
+      "input": {
+        "people": {
+          "ada": {
+            "name": "Ada",
+            "meta": { "team": "compiler|runtime", "active": true }
+          },
+          "linus": {
+            "name": "Linus",
+            "meta": { "team": "kernel", "active": false }
+          }
+        }
+      },
+      "options": {
+        "delimiter": "|",
+        "nestedTabularHeaders": true,
+        "keyedMapCollapse": true
+      },
+      "expected": "people{|name|meta{team|active}}:\n  ada: Ada|\"compiler|runtime\"|true\n  linus: Linus|kernel|false\n"
+    }
+  ]
+}
