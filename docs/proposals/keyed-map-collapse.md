@@ -73,7 +73,8 @@ implementations.
 The saving is the same amortization as tabular arrays — each header field is
 written once instead of once per entry — and grows with entry count. It is a
 no-op below the two-entry guardrail (see below) and for non-uniform maps.
-Reproduce with `scripts/research_token_benchmark.py` (`o200k_base`).
+Reproduce current token and byte evidence with `pnpm benchmark:tokens`; dated
+reports live in `../../benchmarks/results/`.
 
 ## Why it is a good decision
 

@@ -524,56 +524,11 @@ counts, without catching a decode exception and re-deriving the cause.
 ## The wire-efficiency program
 
 The reddb-io flavor treats token efficiency as a measured program, not a slogan.
-The corpora under `tests/wire-efficiency/corpora.json` and the reproducible
-benchmark harness (`scripts/research_token_benchmark.py`) keep the numbers honest
-and let anyone reproduce them. All figures below are tokenized with `o200k_base`
-(the GPT-4o/GPT-5 encoding, via `tiktoken`).
-
-### TOON vs JSON — a uniform table
-
-On a representative payload — a small object with a four-row uniform array of
-five-field deploy records:
-
-| Encoding | Tokens | Bytes |
-| --- | ---: | ---: |
-| JSON, pretty-printed | 200 | 569 |
-| JSON, minified | 114 | 353 |
-| **TOON** | **91** | **189** |
-
-That is **54% fewer tokens than pretty-printed JSON** and **20% fewer than
-minified JSON** on this payload with this tokenizer. The saving is not a universal
-constant: it **grows with the number of rows** in a uniform array (the header is
-amortized) and **shrinks toward zero** for deeply nested, non-uniform data where
-TOON has nothing to collapse. Measure your own payload before quoting a number.
-
-### TOONL vs JSONL — at stream scale
-
-At **10,000 rows**, the append-only streaming layer
-([`toonl-reddb-spec.md`](toonl-reddb-spec.md)) measures, from the shared corpora:
-
-| Payload class | JSONL tokens | TOONL tokens | Saving |
-| --- | ---: | ---: | ---: |
-| Analytics export | 535,576 | 305,604 | **−42.9%** |
-| Flat log | 552,500 | 360,024 | **−34.8%** |
-| Envelope (opaque payload cell) | 990,000 | 906,686 | **−8.4%** |
-
-The saving grows with stream length (the header amortizes), and open TOONL even
-beats closed TOON by a point or two on the same rows — there is no `[N]` to pay
-for while the stream is open. The envelope case, where each record carries one
-opaque JSON payload cell that TOONL cannot collapse, marks the low end of the
-range: the format saves on structure, so a payload with almost no repeated
-structure saves the least.
-
-### Extension corpus measurements
-
-The shared wire-efficiency corpus records byte gates and the token report records
-the current measured wins. With all shipped extensions enabled, the `tree3-100`
-recursive object-array corpus measures **19,076 bytes** and **8,834 tokens**,
-versus **37,076 bytes** and **13,370 tokens** for minified JSON. The
-`matrix-150x8` corpus is emitted through the fixed-width matrix form at
-**7,628 bytes** and **5,107 tokens**; this is byte-neutral against minified JSON
-for that corpus but proves the matrix grammar uses the same opt-in extension
-surface and round-trips through both implementations.
+The canonical reproducible evidence lives in `benchmarks/`: run
+`pnpm benchmark:tokens` for deterministic bytes and `o200k_base` token counts,
+and read dated reports in `benchmarks/results/`. This spec intentionally avoids
+embedding benchmark result tables so the normative grammar does not drift from
+the measured reports.
 
 ## Relationship to the streaming layer
 

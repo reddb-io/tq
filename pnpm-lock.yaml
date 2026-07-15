@@ -6,6 +6,19 @@ settings:
 
 importers:
 
-  .: {}
+  .:
+    devDependencies:
+      gpt-tokenizer:
+        specifier: 3.4.0
+        version: 3.4.0
 
   packages/toon: {}
+
+packages:
+
+  gpt-tokenizer@3.4.0:
+    resolution: {integrity: sha512-wxFLnhIXTDjYebd9A9pGl3e31ZpSypbpIJSOswbgop5jLte/AsZVDvjlbEuVFlsqZixVKqbcoNmRlFDf6pz/UQ==}
+
+snapshots:
+
+  gpt-tokenizer@3.4.0: {}

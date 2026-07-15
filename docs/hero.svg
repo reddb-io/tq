@@ -92,7 +92,7 @@
       <line x1="952" y1="252" x2="1124" y2="252" stroke="#ffffff" stroke-opacity="0.08"/>
       <text x="952" y="282" font-size="13" fill="#6e7681">same data</text>
       <text x="952" y="306" font-size="13" fill="#6e7681">same query language</text>
-      <text x="952" y="330" font-size="13" fill="#3fb950">59% fewer tokens</text>
+      <text x="952" y="330" font-size="13" fill="#3fb950">compact model-facing rows</text>
     </g>
 
     <rect x="0" y="416" width="1200" height="4" fill="#ff2056"/>

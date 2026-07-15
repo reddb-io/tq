@@ -84,7 +84,7 @@ The win grows with row count (the nested header is amortized once) and with the
 number of nested leaves per row. On uniform nested payloads it recovers exactly
 the amortization that the expanded list form throws away; on non-uniform data it
 is a no-op because the encoder falls back. Measure against your own corpus with
-`scripts/research_token_benchmark.py` (tokenized with `o200k_base`), as the spec
+`pnpm benchmark:tokens` (tokenized with `o200k_base`), as the spec
 notes for all extension figures.
 
 ## Why it is a good decision

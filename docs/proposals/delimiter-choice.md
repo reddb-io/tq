@@ -24,7 +24,7 @@ the defaults and the guidance:
   token-efficient when cells do not themselves contain commas.
 - **Tab** when cells routinely contain commas (free-text, locale-formatted
   numbers): a comma value needs no quotes under a tab-delimited header, which
-  usually nets fewer tokens than comma-plus-quotes.
+  usually reduces quote overhead compared with comma-plus-quotes.
 - **Pipe** for human-facing tables and payloads whose cells contain neither
   pipes nor commas uniformly.
 
