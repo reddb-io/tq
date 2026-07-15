@@ -157,12 +157,19 @@ function toonBytes(value, options = {}) {
   return Buffer.byteLength(serialize(value, options), 'utf8')
 }
 
+const EXT_OPTIONS = {
+  nestedTabularHeaders: true,
+  keyedMapCollapse: true,
+  primitiveArrayColumns: true,
+  objectArrayColumns: true,
+}
+
 function caseEntry({ name, description, value, honestyZeroDelta = false, specTokens = undefined }) {
   const expectedBytes = {
     jsonMin: compactJsonBytes(value),
     toonV3: toonBytes(value),
     toonTab: toonBytes(value, { delimiter: '\t' }),
-    toonExt: toonBytes(value, { nestedTabularHeaders: true, keyedMapCollapse: true }),
+    toonExt: toonBytes(value, EXT_OPTIONS),
   }
   return {
     name,
@@ -199,23 +206,20 @@ const cases = [
   }),
   caseEntry({
     name: 'tagged-300',
-    description: 'Primitive-array column honesty control; current shipped extensions must not change bytes.',
+    description: 'Primitive-array column benchmark; opt-in primitive-array columns should beat minified JSON.',
     value: tagged(300, random),
-    honestyZeroDelta: true,
     specTokens: { jsonMin: 6506, toonV3: 8698, hypothetical: 4325, tolerancePct: 5 },
   }),
   caseEntry({
     name: 'matrix-150x8',
-    description: 'List-of-lists honesty control; matrix-only hypothetical remains worse than JSON in the Spec.',
+    description: 'Fixed-width primitive matrix benchmark emitted through object-array columns.',
     value: matrix(150, 8, random),
-    honestyZeroDelta: true,
     specTokens: { jsonMin: 2406, toonV3: 3305, hypothetical: 2707, tolerancePct: 5 },
   }),
   caseEntry({
     name: 'tree3-100',
-    description: 'Three-level record tree honesty control for future child-table work.',
+    description: 'Three-level record tree benchmark for recursive child tables.',
     value: tree3(100, random),
-    honestyZeroDelta: true,
     specTokens: { jsonMin: 11953, toonV3: 13284, hypothetical: 7484, tolerancePct: 5 },
   }),
   caseEntry({
@@ -240,8 +244,8 @@ const fixture = {
   notes: [
     'jsonMin is JSON.stringify(value).',
     'toonV3 is canonical TOON v3 output with no extensions enabled.',
-    'toonExt enables the currently shipped nestedTabularHeaders and keyedMapCollapse options.',
-    'honestyZeroDelta cases must keep toonV3 and toonExt byte-identical until a future extension is implemented.',
+    'toonExt enables the currently shipped nestedTabularHeaders, keyedMapCollapse, primitiveArrayColumns, and objectArrayColumns options.',
+    'honestyZeroDelta cases must keep toonV3 and toonExt byte-identical when ineligible for all shipped extensions.',
     'specTokens records the Spec #93 Further Notes o200k_base baselines where available; token counting is local-only and not part of CI.',
   ],
   cases,
