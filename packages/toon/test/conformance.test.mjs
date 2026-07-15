@@ -17,6 +17,7 @@ import test from 'node:test'
 import {
   ToonlEncoder,
   closeTransform,
+  closeTransformInterleaved,
   encodeLines,
   encodeRecords,
   parse,
@@ -198,6 +199,17 @@ test('TOONL fixtures are executable spec examples', () => {
         assert.deepEqual(documents, testCase.expectedToonDocuments, `${name}: transformed docs`)
         for (const document of documents) {
           parse(document)
+        }
+        if (testCase.expectedInterleavedToonDocuments !== undefined) {
+          const interleavedDocuments = closeTransformInterleaved(testCase.input)
+          assert.deepEqual(
+            interleavedDocuments,
+            testCase.expectedInterleavedToonDocuments,
+            `${name}: interleaved transformed docs`,
+          )
+          for (const document of interleavedDocuments) {
+            parse(document)
+          }
         }
         continue
       }
