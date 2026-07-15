@@ -376,6 +376,64 @@ fn toonl_record_encoders_canonicalize_shuffled_shape_field_order() {
 }
 
 #[test]
+fn toonl_writer_interleaves_tagged_lanes_and_rejects_overflow_before_writing() {
+    let req_one = Value::from_json_str(r#"{"method":"GET","path":"/health","status":200}"#)
+        .expect("req row");
+    let metric_one = Value::from_json_str(r#"{"name":"cpu","value":0.42}"#).expect("metric row");
+    let req_two = Value::from_json_str(r#"{"status":401,"path":"/login","method":"POST"}"#)
+        .expect("req row");
+    let metric_two = Value::from_json_str(r#"{"value":0.55,"name":"cpu"}"#).expect("metric row");
+
+    let mut output = Vec::new();
+    {
+        let mut writer = ToonlWriter::new(&mut output);
+        writer
+            .write_tagged_record("req", &req_one)
+            .expect("write req row");
+        writer
+            .write_tagged_record("metric", &metric_one)
+            .expect("write metric row");
+        writer
+            .write_tagged_record("req", &req_two)
+            .expect("write req row");
+        writer
+            .write_tagged_record("metric", &metric_two)
+            .expect("write metric row");
+        writer.finish().expect("finish writer");
+    }
+
+    let output = String::from_utf8(output).unwrap();
+    assert_eq!(
+        output,
+        "[]<req>{method,path,status}:\n\
+         req:GET,/health,200\n\
+         []<metric>{name,value}:\n\
+         metric:cpu,0.42\n\
+         req:POST,/login,401\n\
+         metric:cpu,0.55\n"
+    );
+
+    let rows = ToonlReader::new(std::io::Cursor::new(output.as_bytes()))
+        .collect::<Result<Vec<_>, _>>()
+        .expect("tagged rows decode");
+    assert_eq!(rows, vec![req_one, metric_one, req_two, metric_two]);
+
+    let mut writer = ToonlWriter::new(Vec::new());
+    for tag in ["a", "b", "c", "d", "e", "f", "g", "h"] {
+        let row = Value::from_json_str(&format!(r#"{{"v":"{tag}"}}"#)).expect("row");
+        writer.write_tagged_record(tag, &row).expect("write lane");
+    }
+    let row = Value::from_json_str(r#"{"v":"i"}"#).expect("row");
+    let error = writer
+        .write_tagged_record("i", &row)
+        .expect_err("9th live tagged lane is rejected");
+    assert!(error.to_string().contains("too many tagged lanes"));
+    let output = String::from_utf8(writer.finish().expect("finish writer")).unwrap();
+    assert!(!output.contains("[]<i>{v}:"));
+    assert!(!output.contains("i:i"));
+}
+
+#[test]
 fn streaming_bridges_round_trip_jsonl_toonl_jsonl_and_close_documents() {
     let jsonl = br#"{"id":1,"name":"Ada"}
 {"id":2,"name":"Linus","role":"dev"}
