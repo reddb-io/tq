@@ -8,7 +8,7 @@ import { parse, serialize } from '../src/index.js'
 
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url))
 const FIXTURE_PATH = join(REPO_ROOT, 'tests/json-limits/corpus.json')
-const EXPECTED_CASE_COUNT = 25
+const EXPECTED_CASE_COUNT = 26
 const REQUIRED_CATEGORIES = new Set([
   'numbers',
   'strings-unicode',
@@ -82,6 +82,15 @@ test('JSON limits corpus resolves consistently for the JS package', () => {
     const value = JSON.parse(testCase.rawJson)
     const toon = serialize(value)
     assert.equal(toon, expectedToon(expected), `${testCase.name}: canonical TOON`)
+
+    if (expected.nestedHeaderToon !== undefined) {
+      const nestedToon = serialize(value, { nestedTabularHeaders: true })
+      assert.equal(nestedToon, expected.nestedHeaderToon, `${testCase.name}: nested-header TOON`)
+      assert.ok(
+        jsonEqual(parse(nestedToon), JSON.parse(expected.roundTripJson)),
+        `${testCase.name}: expected nested-header round trip ${expected.roundTripJson}, got ${JSON.stringify(parse(nestedToon))}`,
+      )
+    }
 
     const actualRoundTrip = parse(toon)
     const expectedRoundTrip = JSON.parse(expected.roundTripJson)
