@@ -5,7 +5,7 @@
 //! the encoder emits the canonical default profile: comma document delimiter,
 //! two-space indentation, no key folding.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::io::{BufRead, Write};
 
@@ -14,6 +14,7 @@ pub const DEFAULT_INDENT: usize = 2;
 
 /// The document delimiter used by the encoder (spec §11.1, default profile).
 const DOCUMENT_DELIMITER: char = ',';
+const TOONL_TAGGED_LANE_LIMIT: usize = 8;
 
 /// Decoder options (spec §13).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,6 +173,13 @@ struct ToonlHeaderLine {
     fields: Vec<String>,
     header_fields: String,
     continuation: bool,
+    tag: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TaggedToonlLane {
+    segments: Vec<ToonlSegment>,
+    current: Option<ToonlSegment>,
 }
 
 #[derive(Debug)]
@@ -184,6 +192,7 @@ pub struct ToonlRowReader<R> {
     rows_since_header: usize,
     anchor: Option<ToonlCursorAnchor>,
     current: Option<OpenToonlSegment>,
+    tagged_lanes: HashMap<String, OpenToonlSegment>,
     finished: bool,
 }
 
@@ -556,8 +565,11 @@ impl std::error::Error for ToonlResumeError {}
 
 impl ToonlStream {
     pub fn parse(input: &str) -> Result<Self, ToonlError> {
-        let mut segments = Vec::new();
+        let mut anonymous_segments = Vec::new();
         let mut current: Option<ToonlSegment> = None;
+        let mut tagged_lanes: HashMap<String, TaggedToonlLane> = HashMap::new();
+        let mut tagged_lane_order: Vec<String> = Vec::new();
+        let mut saw_tagged_syntax = false;
 
         for (offset, raw_line) in input.lines().enumerate() {
             let line_number = offset + 1;
@@ -575,7 +587,7 @@ impl ToonlStream {
                 if segment.rows.len() != expected {
                     return Err(toonl_error(line_number, "trailer count mismatch"));
                 }
-                segments.push(segment);
+                anonymous_segments.push(segment);
                 continue;
             }
             if let Some(header) = parse_toonl_header(line, line_number)? {
@@ -583,8 +595,37 @@ impl ToonlStream {
                     ensure_continuation_matches(current.as_ref(), &header, line_number)?;
                     continue;
                 }
+                if let Some(tag) = header.tag {
+                    saw_tagged_syntax = true;
+                    let lane = if tagged_lanes.contains_key(&tag) {
+                        tagged_lanes.get_mut(&tag).expect("lane exists")
+                    } else {
+                        if tagged_lanes.len() >= TOONL_TAGGED_LANE_LIMIT {
+                            return Err(toonl_error(line_number, "too many tagged lanes"));
+                        }
+                        tagged_lane_order.push(tag.clone());
+                        tagged_lanes.insert(
+                            tag.clone(),
+                            TaggedToonlLane {
+                                segments: Vec::new(),
+                                current: None,
+                            },
+                        );
+                        tagged_lanes.get_mut(&tag).expect("inserted lane exists")
+                    };
+                    if let Some(segment) = lane.current.take() {
+                        lane.segments.push(segment);
+                    }
+                    lane.current = Some(ToonlSegment {
+                        delimiter: header.delimiter,
+                        fields: header.fields,
+                        header_fields: header.header_fields,
+                        rows: Vec::new(),
+                    });
+                    continue;
+                }
                 if let Some(segment) = current.take() {
-                    segments.push(segment);
+                    anonymous_segments.push(segment);
                 }
                 current = Some(ToonlSegment {
                     delimiter: header.delimiter,
@@ -592,6 +633,24 @@ impl ToonlStream {
                     header_fields: header.header_fields,
                     rows: Vec::new(),
                 });
+                continue;
+            }
+            if let Some((tag, row_text)) = toonl_tagged_row_prefix(line, line_number)? {
+                saw_tagged_syntax = true;
+                let lane = tagged_lanes
+                    .get_mut(tag)
+                    .ok_or_else(|| toonl_error(line_number, "unknown tag"))?;
+                let segment = lane
+                    .current
+                    .as_mut()
+                    .expect("declared tagged lane has a current segment");
+                let row = parse_toonl_row(
+                    row_text,
+                    segment.delimiter,
+                    segment.fields.len(),
+                    line_number,
+                )?;
+                segment.rows.push(row);
                 continue;
             }
 
@@ -603,7 +662,24 @@ impl ToonlStream {
         }
 
         if let Some(segment) = current {
-            segments.push(segment);
+            anonymous_segments.push(segment);
+        }
+
+        if !saw_tagged_syntax {
+            return Ok(Self {
+                segments: anonymous_segments,
+            });
+        }
+
+        let mut segments = anonymous_segments;
+        for tag in tagged_lane_order {
+            let mut lane = tagged_lanes
+                .remove(&tag)
+                .expect("lane order only contains declared lanes");
+            segments.append(&mut lane.segments);
+            if let Some(segment) = lane.current {
+                segments.push(segment);
+            }
         }
 
         Ok(Self { segments })
@@ -999,64 +1075,11 @@ pub fn close_transform_stream<R: BufRead, W: Write>(
     mut reader: R,
     mut writer: W,
 ) -> Result<(), ToonlError> {
-    let mut line = String::new();
-    let mut line_number = 0;
-    let mut current: Option<ToonlSegment> = None;
-
-    loop {
-        line.clear();
-        match reader.read_line(&mut line) {
-            Ok(0) => break,
-            Ok(_) => {}
-            Err(error) => return Err(read_toonl_error(error)),
-        }
-        line_number += 1;
-        let line = line.trim_end_matches('\n').trim_end_matches('\r');
-        if line.is_empty() {
-            continue;
-        }
-        if line.starts_with("- ") {
-            return Err(toonl_error(line_number, "reserved line prefix"));
-        }
-        if let Some(expected) = toonl_trailer_count(line, line_number)? {
-            let segment = current
-                .take()
-                .ok_or_else(|| toonl_error(line_number, "trailer without header"))?;
-            if segment.rows.len() != expected {
-                return Err(toonl_error(line_number, "trailer count mismatch"));
-            }
-            writer
-                .write_all(segment.to_closed_toon_document().as_bytes())
-                .map_err(write_toonl_error)?;
-            continue;
-        }
-        if let Some(header) = parse_toonl_header(line, line_number)? {
-            if header.continuation {
-                ensure_continuation_matches(current.as_ref(), &header, line_number)?;
-                continue;
-            }
-            if let Some(segment) = current.take() {
-                writer
-                    .write_all(segment.to_closed_toon_document().as_bytes())
-                    .map_err(write_toonl_error)?;
-            }
-            current = Some(ToonlSegment {
-                delimiter: header.delimiter,
-                fields: header.fields,
-                header_fields: header.header_fields,
-                rows: Vec::new(),
-            });
-            continue;
-        }
-
-        let segment = current
-            .as_mut()
-            .ok_or_else(|| toonl_error(line_number, "row before header"))?;
-        let row = parse_toonl_row(line, segment.delimiter, segment.fields.len(), line_number)?;
-        segment.rows.push(row);
-    }
-
-    if let Some(segment) = current {
+    let mut input = String::new();
+    reader
+        .read_to_string(&mut input)
+        .map_err(read_toonl_error)?;
+    for segment in ToonlStream::parse(&input)?.segments() {
         writer
             .write_all(segment.to_closed_toon_document().as_bytes())
             .map_err(write_toonl_error)?;
@@ -1075,6 +1098,7 @@ impl<R: BufRead> ToonlRowReader<R> {
             rows_since_header: 0,
             anchor: None,
             current: None,
+            tagged_lanes: HashMap::new(),
             finished: false,
         }
     }
@@ -1160,6 +1184,23 @@ impl<R: BufRead> ToonlRowReader<R> {
                 ensure_open_continuation_matches(self.current.as_ref(), &header, self.line_number)?;
                 return Ok(());
             }
+            if let Some(tag) = header.tag {
+                if !self.tagged_lanes.contains_key(&tag)
+                    && self.tagged_lanes.len() >= TOONL_TAGGED_LANE_LIMIT
+                {
+                    return Err(toonl_error(self.line_number, "too many tagged lanes"));
+                }
+                self.tagged_lanes.insert(
+                    tag,
+                    OpenToonlSegment {
+                        delimiter: header.delimiter,
+                        fields: header.fields,
+                        header_fields: header.header_fields,
+                        row_count: 0,
+                    },
+                );
+                return Ok(());
+            }
             self.active_header_line = Some(toonl_header_text(
                 header.delimiter,
                 &header.header_fields,
@@ -1188,6 +1229,26 @@ impl<R: BufRead> ToonlRowReader<R> {
                     .is_some())
         {
             return None;
+        }
+
+        if let Some((tag, row_text)) = match toonl_tagged_row_prefix(line, self.line_number) {
+            Ok(prefix) => prefix,
+            Err(error) => return Some(Err(error)),
+        } {
+            let Some(segment) = self.tagged_lanes.get_mut(tag) else {
+                return Some(Err(toonl_error(self.line_number, "unknown tag")));
+            };
+            let row = match parse_toonl_row(
+                row_text,
+                segment.delimiter,
+                segment.fields.len(),
+                self.line_number,
+            ) {
+                Ok(row) => row,
+                Err(error) => return Some(Err(error)),
+            };
+            segment.row_count += 1;
+            return Some(toonl_row_value(&segment.fields, &row, self.line_number));
         }
 
         let Some(segment) = self.current.as_mut() else {
@@ -1239,7 +1300,7 @@ impl ToonlRowReader<std::io::Cursor<Vec<u8>>> {
             .ok_or_else(|| {
                 ToonlResumeError::Parse(toonl_error(0, "invalid cursor activeHeaderLine"))
             })?;
-        if header.continuation {
+        if header.continuation || header.tag.is_some() {
             return Err(ToonlResumeError::Parse(toonl_error(
                 0,
                 "invalid cursor activeHeaderLine",
@@ -1261,6 +1322,7 @@ impl ToonlRowReader<std::io::Cursor<Vec<u8>>> {
                 header_fields: header.header_fields,
                 row_count: cursor.rows_since_header,
             }),
+            tagged_lanes: HashMap::new(),
             finished: false,
         })
     }
@@ -1856,7 +1918,20 @@ fn parse_toonl_header(
         other if !continuation && other.starts_with('=') => return Ok(None),
         _ => return Err(toonl_error(line_number, "invalid header delimiter")),
     };
-    let suffix = &rest[close_bracket + 1..];
+    let mut suffix = &rest[close_bracket + 1..];
+    let mut tag = None;
+    if !continuation && suffix.starts_with('<') {
+        let tag_end = suffix
+            .find('>')
+            .ok_or_else(|| toonl_error(line_number, "invalid tag"))?;
+        let tag_text = &suffix[1..tag_end];
+        validate_toonl_tag(tag_text, line_number)?;
+        if delimiter_text != "" {
+            return Err(toonl_error(line_number, "invalid header delimiter"));
+        }
+        tag = Some(tag_text.to_owned());
+        suffix = &suffix[tag_end + 1..];
+    }
     if !suffix.starts_with('{') || !suffix.ends_with("}:") {
         return Err(toonl_error(line_number, "invalid header"));
     }
@@ -1883,7 +1958,49 @@ fn parse_toonl_header(
         fields,
         header_fields,
         continuation,
+        tag,
     }))
+}
+
+fn validate_toonl_tag(tag: &str, line_number: usize) -> Result<(), ToonlError> {
+    if tag.is_empty()
+        || !tag
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return Err(toonl_error(line_number, "invalid tag"));
+    }
+    Ok(())
+}
+
+fn toonl_tagged_row_prefix<'a>(
+    line: &'a str,
+    line_number: usize,
+) -> Result<Option<(&'a str, &'a str)>, ToonlError> {
+    let Some(colon) = line.find(':') else {
+        return Ok(None);
+    };
+    if colon == 0 {
+        return Ok(None);
+    }
+    let tag = &line[..colon];
+    if validate_toonl_tag(tag, line_number).is_ok() {
+        return Ok(Some((tag, &line[colon + 1..])));
+    }
+    if tag
+        .bytes()
+        .next()
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        && tag.bytes().all(|byte| {
+            !matches!(
+                byte,
+                b',' | b'[' | b']' | b'|' | b'{' | b'}' | b':' | b'\t' | b' '
+            )
+        })
+    {
+        return Err(toonl_error(line_number, "invalid tag"));
+    }
+    Ok(None)
 }
 
 fn ensure_continuation_matches(
