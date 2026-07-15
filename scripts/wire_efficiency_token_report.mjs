@@ -54,6 +54,7 @@ console.log(
     'Scenario'.padEnd(26),
     pad('JSON min', 9),
     pad('TOON v3', 9),
+    pad('TOON tab', 9),
     pad('TOON+ext', 9),
     pad('ext vs JSON', 11),
     'Spec baseline',
@@ -65,10 +66,12 @@ for (const testCase of fixture.cases) {
   const value = testCase.value
   const jsonMin = JSON.stringify(value)
   const toonV3 = serialize(value)
+  const toonTab = serialize(value, { delimiter: '\t' })
   const toonExt = serialize(value, EXT_OPTIONS)
   const counts = {
     jsonMin: tokens(encoding, jsonMin),
     toonV3: tokens(encoding, toonV3),
+    toonTab: tokens(encoding, toonTab),
     toonExt: tokens(encoding, toonExt),
   }
   const spec = testCase.specTokens
@@ -79,6 +82,7 @@ for (const testCase of fixture.cases) {
       testCase.name.padEnd(26),
       pad(counts.jsonMin, 9),
       pad(counts.toonV3, 9),
+      pad(counts.toonTab, 9),
       pad(counts.toonExt, 9),
       pad(pct(counts.toonExt - counts.jsonMin, counts.jsonMin), 11),
       spec,
