@@ -28,12 +28,15 @@ test('wire-efficiency corpora assert encoded byte sizes for JS', () => {
     const value = testCase.value
     const jsonMin = JSON.stringify(value)
     const toonV3 = serialize(value)
+    const toonTab = serialize(value, { delimiter: '\t' })
     const toonExt = serialize(value, EXT_OPTIONS)
 
     assert.equal(byteLength(jsonMin), testCase.expectedBytes.jsonMin, `${testCase.name}: JSON min bytes`)
     assert.equal(byteLength(toonV3), testCase.expectedBytes.toonV3, `${testCase.name}: TOON v3 bytes`)
+    assert.equal(byteLength(toonTab), testCase.expectedBytes.toonTab, `${testCase.name}: TOON tab bytes`)
     assert.equal(byteLength(toonExt), testCase.expectedBytes.toonExt, `${testCase.name}: TOON+ext bytes`)
     assert.deepEqual(parse(toonV3), value, `${testCase.name}: TOON v3 round trip`)
+    assert.deepEqual(parse(toonTab), value, `${testCase.name}: TOON tab round trip`)
     assert.deepEqual(parse(toonExt), value, `${testCase.name}: TOON+ext round trip`)
 
     if (testCase.honestyZeroDelta) {
