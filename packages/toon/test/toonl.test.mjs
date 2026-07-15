@@ -256,6 +256,43 @@ test('encodeLines output decodes back to the records it was given', async () => 
   assert.deepEqual(await collect(encodeRecords(records)), records)
 })
 
+test('encodeLines interleaves tagged lanes and canonicalizes each lane shape', async () => {
+  const emitter = encodeLines()
+  let output = ''
+
+  output += emitter.pushTagged('req', { method: 'GET', path: '/health', status: 200 })
+  output += emitter.pushTagged('metric', { name: 'cpu', value: 0.42 })
+  output += emitter.pushTagged('req', { status: 401, path: '/login', method: 'POST' })
+  output += emitter.pushTagged('metric', { value: 0.55, name: 'cpu' })
+
+  assert.equal(
+    output + emitter.end(),
+    '[]<req>{method,path,status}:\n' +
+      'req:GET,/health,200\n' +
+      '[]<metric>{name,value}:\n' +
+      'metric:cpu,0.42\n' +
+      'req:POST,/login,401\n' +
+      'metric:cpu,0.55\n',
+  )
+  assert.deepEqual(await collect(output), [
+    { method: 'GET', path: '/health', status: 200 },
+    { name: 'cpu', value: 0.42 },
+    { method: 'POST', path: '/login', status: 401 },
+    { name: 'cpu', value: 0.55 },
+  ])
+})
+
+test('encodeLines rejects the ninth tagged lane before producing bytes', () => {
+  const emitter = encodeLines()
+  let output = ''
+  for (const tag of ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']) {
+    output += emitter.pushTagged(tag, { v: tag })
+  }
+
+  assert.throws(() => emitter.pushTagged('i', { v: 'i' }), /too many tagged lanes/)
+  assert.equal(output.includes('[]<i>{v}:'), false)
+})
+
 test('encodeLines rejects rows TOONL cannot represent', () => {
   const emitter = encodeLines()
 
