@@ -134,10 +134,10 @@ fn primitive_array_column_corpus_decodes_identically_for_rust() {
 
 #[test]
 fn object_array_column_corpus_decodes_identically_for_rust() {
-    let fixture: Json = serde_json::from_str(&fs::read_to_string(fixture_path(
-        OBJECT_ARRAY_COLUMNS_FIXTURE,
-    ))
-    .expect("object-array column fixture"))
+    let fixture: Json = serde_json::from_str(
+        &fs::read_to_string(fixture_path(OBJECT_ARRAY_COLUMNS_FIXTURE))
+            .expect("object-array column fixture"),
+    )
     .expect("object-array column fixture json");
     assert_eq!(fixture.get("version").and_then(Json::as_u64), Some(1));
 
@@ -154,11 +154,7 @@ fn object_array_column_corpus_decodes_identically_for_rust() {
             .to_json_value();
         assert_eq!(&decoded, expected, "{name}: decoded value");
 
-        if test_case
-            .get("failClosedV3Strict")
-            .and_then(Json::as_bool)
-            == Some(true)
-        {
+        if test_case.get("failClosedV3Strict").and_then(Json::as_bool) == Some(true) {
             assert!(
                 reject_v3_strict(input).is_err(),
                 "{name}: strict v3 rejects extension form"
@@ -229,6 +225,81 @@ fn primitive_array_column_encoding_is_opt_in_and_falls_back_losslessly_for_rust(
     );
 }
 
+#[test]
+fn object_array_column_encoding_is_opt_in_and_falls_back_losslessly_for_rust() {
+    let eligible = serde_json::json!({
+        "orders": [
+            {
+                "id": "ord_001",
+                "customer": "cust_a",
+                "items": [
+                    {
+                        "sku": "sku_1",
+                        "quantity": 3,
+                        "components": [{ "part": "part_a", "lot": "lot_1", "ok": true }]
+                    },
+                    { "sku": "sku_2", "quantity": 1, "components": [] }
+                ]
+            },
+            { "id": "ord_002", "customer": "cust_b", "items": [] }
+        ]
+    });
+    let value = Value::from_json_value(eligible.clone());
+    let encoded = value.to_toon_with_options(EncodeOptions {
+        object_array_columns: true,
+        delimiter: '|',
+        ..EncodeOptions::default()
+    });
+    assert_eq!(
+        encoded,
+        "orders[2|]{id|customer|items{sku|quantity|components{part|lot|ok}}}:\n  ord_001|cust_a|2\n    sku_1|3|1\n      part_a|lot_1|true\n    sku_2|1|0\n  ord_002|cust_b|0\n"
+    );
+    assert_ne!(
+        encoded,
+        value.to_toon_with_options(EncodeOptions {
+            delimiter: '|',
+            ..EncodeOptions::default()
+        })
+    );
+    assert_eq!(
+        Value::parse_toon(&encoded).unwrap().to_json_value(),
+        eligible
+    );
+
+    let matrix = serde_json::json!({ "matrix": [[1, 2, 3], [4, 5, 6]] });
+    let matrix_value = Value::from_json_value(matrix.clone());
+    let matrix_encoded = matrix_value.to_toon_with_options(EncodeOptions {
+        object_array_columns: true,
+        delimiter: '|',
+        ..EncodeOptions::default()
+    });
+    assert_eq!(
+        matrix_encoded,
+        "matrix[2|]{values[3|]}:\n  1|2|3\n  4|5|6\n"
+    );
+    assert_eq!(
+        Value::parse_toon(&matrix_encoded).unwrap().to_json_value(),
+        matrix
+    );
+
+    let ineligible = serde_json::json!({
+        "orders": [
+            { "id": "ord_001", "items": [{ "sku": "a" }] },
+            { "id": "ord_002", "items": [1] }
+        ]
+    });
+    let value = Value::from_json_value(ineligible.clone());
+    let encoded = value.to_toon_with_options(EncodeOptions {
+        object_array_columns: true,
+        ..EncodeOptions::default()
+    });
+    assert_eq!(encoded, value.to_canonical_toon());
+    assert_eq!(
+        Value::parse_toon(&encoded).unwrap().to_json_value(),
+        ineligible
+    );
+}
+
 fn fixture_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative)
 }
@@ -244,6 +315,7 @@ fn ext_options() -> EncodeOptions {
         nested_tabular_headers: true,
         keyed_map_collapse: true,
         primitive_array_columns: true,
+        object_array_columns: true,
         ..EncodeOptions::default()
     }
 }

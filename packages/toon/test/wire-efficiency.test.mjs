@@ -16,7 +16,7 @@ const OBJECT_ARRAY_COLUMNS_PATH = join(
   REPO_ROOT,
   'tests/wire-efficiency/object-array-columns.json',
 )
-const EXT_OPTIONS = { nestedTabularHeaders: true, keyedMapCollapse: true, primitiveArrayColumns: true }
+const EXT_OPTIONS = { nestedTabularHeaders: true, keyedMapCollapse: true, primitiveArrayColumns: true, objectArrayColumns: true }
 const EXPECTED_CASE_COUNT = 9
 
 function readFixture(path) {
@@ -124,6 +124,38 @@ test('primitive-array column encoding is opt-in and falls back losslessly for in
   const ineligible = { items: [{ id: 1, tags: null }, { id: 2, tags: ['ok'] }] }
   assert.equal(serialize(ineligible, { primitiveArrayColumns: true }), serialize(ineligible))
   assert.deepEqual(parse(serialize(ineligible, { primitiveArrayColumns: true })), ineligible)
+})
+
+test('object-array column encoding is opt-in and falls back losslessly for ineligible values in JS', () => {
+  const eligible = {
+    orders: [
+      {
+        id: 'ord_001',
+        customer: 'cust_a',
+        items: [
+          { sku: 'sku_1', quantity: 3, components: [{ part: 'part_a', lot: 'lot_1', ok: true }] },
+          { sku: 'sku_2', quantity: 1, components: [] },
+        ],
+      },
+      { id: 'ord_002', customer: 'cust_b', items: [] },
+    ],
+  }
+  const encoded = serialize(eligible, { objectArrayColumns: true, delimiter: '|' })
+  assert.equal(
+    encoded,
+    'orders[2|]{id|customer|items{sku|quantity|components{part|lot|ok}}}:\n  ord_001|cust_a|2\n    sku_1|3|1\n      part_a|lot_1|true\n    sku_2|1|0\n  ord_002|cust_b|0\n',
+  )
+  assert.notEqual(encoded, serialize(eligible, { delimiter: '|' }))
+  assert.deepEqual(parse(encoded), eligible)
+
+  const matrix = { matrix: [[1, 2, 3], [4, 5, 6]] }
+  const matrixEncoded = serialize(matrix, { objectArrayColumns: true, delimiter: '|' })
+  assert.equal(matrixEncoded, 'matrix[2|]{values[3|]}:\n  1|2|3\n  4|5|6\n')
+  assert.deepEqual(parse(matrixEncoded), matrix)
+
+  const ineligible = { orders: [{ id: 'ord_001', items: [{ sku: 'a' }] }, { id: 'ord_002', items: [1] }] }
+  assert.equal(serialize(ineligible, { objectArrayColumns: true }), serialize(ineligible))
+  assert.deepEqual(parse(serialize(ineligible, { objectArrayColumns: true })), ineligible)
 })
 
 function rejectV3Strict(input) {
