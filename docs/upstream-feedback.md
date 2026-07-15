@@ -6,12 +6,10 @@ choice) and [toon-format/spec#49](https://github.com/toon-format/spec/issues/49)
 (array-valued fields in tabular rows) end-to-end in our v3.3-compatible dialect
 (JS + Rust + `tq`, 100% official conformance corpus on both implementations),
 measured them with a real tokenizer (`o200k_base`), and are reporting the
-results back upstream. Headline numbers: primitive-array columns
-**−48.4% bytes / −29.5% tokens** vs minified JSON on a tagged-record corpus;
-recursive child tables **−48.5% bytes / −30.4% tokens** on a 3-level tree
-corpus — with TOON's self-checking guardrails preserved. This document is the
-in-repo record of that feedback package: the measured results and the exact
-comment texts approved for posting.
+results back upstream. Current bytes and token figures now live in the canonical
+benchmark reports under `../benchmarks/results/`. This document is the in-repo
+record of that feedback package and the exact comment texts approved for
+posting.
 
 ## Table of contents
 
@@ -124,8 +122,8 @@ detectable, where minified JSON misses all three. Details in the
 > deterministically.
 >
 > **Measured result.** On a 300-row tagged-record corpus (rows + a small list
-> of string labels — the shape that motivates this RFC), the wire is **−48.4%
-> bytes and −29.5% tokens vs minified JSON**. Notably, plain TOON v3.3 is
+> of string labels — the shape that motivates this RFC), the wire is measured
+> by the canonical benchmark reports under `benchmarks/results/`. Notably, plain TOON v3.3 is
 > *worse* than minified JSON on that corpus (the array field forces expanded
 > list form), so this recovers a shape where TOON currently loses.
 >
@@ -141,7 +139,7 @@ detectable, where minified JSON misses all three. Details in the
 > for object-array fields (`items{sku,qty}` in the header; the parent cell
 > stores the child row count; child rows indent below). That keeps a stronger
 > guardrail (every child count is checked, so truncation is a local parse
-> error) and measures **−48.5% bytes / −30.4% tokens vs minified JSON** on a
+> error) and is measured by the canonical benchmark reports on a
 > 3-level tree corpus. A uniform numeric matrix is expressible in the same
 > grammar but is a token *loss* (+6.4%) against minified JSON — worth an honest
 > caveat in any spec text.
