@@ -12,7 +12,7 @@ const PRIMITIVE_ARRAY_COLUMNS_PATH = join(
   REPO_ROOT,
   'tests/wire-efficiency/primitive-array-columns.json',
 )
-const EXT_OPTIONS = { nestedTabularHeaders: true, keyedMapCollapse: true }
+const EXT_OPTIONS = { nestedTabularHeaders: true, keyedMapCollapse: true, primitiveArrayColumns: true }
 const EXPECTED_CASE_COUNT = 9
 
 function readFixture(path) {
