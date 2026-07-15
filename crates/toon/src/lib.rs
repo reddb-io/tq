@@ -1670,7 +1670,7 @@ fn parse_field(
 
     let array_open = find_unquoted(key_part, '[', line.number)?;
     let map_open = find_unquoted(key_part, '{', line.number)?;
-    if map_open.is_some_and(|open| array_open.is_none_or(|array_open| open < array_open)) {
+    if map_open.is_some_and(|open| array_open.map_or(true, |array_open| open < array_open)) {
         match parse_map_header(key_part) {
             Ok(header) => {
                 if !value_part.trim().is_empty() {
