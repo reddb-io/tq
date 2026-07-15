@@ -16,13 +16,16 @@ const EXTENSIONS = {
   'toon-ext-child-tables': { nestedTabularHeaders: true, objectArrayColumns: true },
   'toon-ext-delimiter-pipe': { delimiter: '|' },
   'toon-ext-keyed-map-collapse': { nestedTabularHeaders: true, keyedMapCollapse: true },
+  'toon-ext-cyclic-discriminated-arrays': { cyclicDiscriminatedArrays: true },
   'toon-ext-all': {
     nestedTabularHeaders: true,
     keyedMapCollapse: true,
     primitiveArrayColumns: true,
     objectArrayColumns: true,
+    cyclicDiscriminatedArrays: true,
   },
 }
+const CYCLIC_FRONTIER_MAX_TOKENS_VS_JSON = -1
 
 const encoder = new TextEncoder()
 
@@ -41,7 +44,7 @@ function pct(value, base) {
 
 function representativeDatasets() {
   const files = datasetFiles(DATASETS_DIR)
-  return files.map((file) => {
+  const datasets = files.map((file) => {
     const value = JSON.parse(readFileSync(file, 'utf8'))
     const parts = relative(DATASETS_DIR, file).split('/')
     const shapeClass = parts[0]
@@ -58,6 +61,61 @@ function representativeDatasets() {
       records: firstRecordArray(value),
     }
   })
+  datasets.push(...cyclicRepresentativeDatasets())
+  return datasets
+}
+
+function cyclicRepresentativeDatasets() {
+  return [
+    cyclicCase('cycle2-24-minimal', ['open', 'comment'], 24, 'minimal', 11),
+    cyclicCase('cycle3-90-rich', ['open', 'comment', 'check'], 90, 'rich', 17),
+    cyclicCase('cycle4-240-rich', ['open', 'comment', 'check', 'deploy'], 240, 'rich', 23),
+    cyclicCase('cycle5-500-rich', ['open', 'comment', 'check', 'deploy', 'metric'], 500, 'rich', 29),
+  ].map((testCase) => ({
+    name: `cyclic-discriminated-arrays/${testCase.name}`,
+    section: 'representative',
+    shapeClass: 'cyclic-discriminated-arrays',
+    variant: testCase.name.replace(/^cycle[0-9]-/, ''),
+    recordCount: testCase.value.events.length,
+    value: testCase.value,
+    records: firstRecordArray(testCase.value),
+    cyclicFrontier: true,
+    rustExtensions: {
+      'toon-rust-ext-cyclic-discriminated-arrays': ['--cyclic-discriminated-arrays'],
+    },
+  }))
+}
+
+function cyclicCase(name, cycle, records, mix, seed) {
+  const rand = lcg(seed)
+  return {
+    name,
+    value: {
+      events: Array.from({ length: records }, (_, index) => eventFor(cycle[index % cycle.length], index, rand, mix)),
+    },
+  }
+}
+
+function eventFor(type, index, rand, mix) {
+  const base = {
+    type,
+    id: `evt_${String(index).padStart(5, '0')}`,
+    ts: `2026-07-15T${String(8 + Math.floor(index / 60)).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}:00Z`,
+  }
+  if (mix !== 'minimal') base.actor = `user_${1 + Math.floor(rand() * 7)}`
+  if (type === 'open') return { ...base, issue: `ISS-${1000 + index}`, priority: ['low', 'medium', 'high'][index % 3] }
+  if (type === 'comment') return { ...base, comment: `comment ${index}`, mentions: Math.floor(rand() * 4) }
+  if (type === 'check') return { ...base, check: ['lint', 'test', 'build'][index % 3], duration_ms: 1200 + Math.floor(rand() * 9000) }
+  if (type === 'deploy') return { ...base, env: ['staging', 'prod'][index % 2], sha: Math.floor(rand() * 0xffffffff).toString(16).padStart(8, '0') }
+  return { ...base, metric: Number((rand() * 100).toFixed(3)) }
+}
+
+function lcg(seed) {
+  let state = seed >>> 0
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0
+    return state / 0x100000000
+  }
 }
 
 function datasetFiles(dir) {
@@ -94,6 +152,17 @@ function localDatasets() {
     shapeClass: 'wire-showcase',
     value: testCase.expected,
     records: firstRecordArray(testCase.expected),
+  })))
+  const cyclic = JSON.parse(readFileSync(join(REPO_ROOT, 'tests/corpus/wire-efficiency/cyclic-discriminated-arrays.json'), 'utf8'))
+  datasets.push(...cyclic.cases.map((testCase) => ({
+    name: `wire-extension-cyclic-${slug(testCase.name)}`,
+    section: 'extension-eligibility showcase',
+    shapeClass: 'cyclic-discriminated-arrays',
+    value: testCase.expected,
+    records: firstRecordArray(testCase.expected),
+    rustExtensions: {
+      'toon-rust-ext-cyclic-discriminated-arrays': ['--cyclic-discriminated-arrays'],
+    },
   })))
   return datasets
 }
@@ -208,6 +277,9 @@ function formatsFor(dataset) {
   for (const [name, options] of Object.entries(EXTENSIONS)) {
     formats.set(name, serialize(dataset.value, options))
   }
+  for (const [name, flags] of Object.entries(dataset.rustExtensions ?? {})) {
+    formats.set(name, rustToon(dataset.value, flags))
+  }
   if (dataset.records) {
     formats.set('jsonl', jsonl(dataset.records))
     formats.set('csv', csv(dataset.records))
@@ -224,6 +296,19 @@ function rustCanonicalToon(file) {
   })
   if (result.status !== 0) {
     throw new Error(`Rust crate encoder failed for ${relative(REPO_ROOT, file)}:\n${result.stderr || result.stdout}`)
+  }
+  return result.stdout
+}
+
+function rustToon(value, flags) {
+  const result = spawnSync('cargo', ['run', '--quiet', '-p', 'reddb-io-tq', '--', '-p', 'json', '-o', 'toon', ...flags, '.'], {
+    cwd: REPO_ROOT,
+    input: JSON.stringify(value),
+    encoding: 'utf8',
+    maxBuffer: 50 * 1024 * 1024,
+  })
+  if (result.status !== 0) {
+    throw new Error(`Rust crate encoder failed for inline benchmark value:\n${result.stderr || result.stdout}`)
   }
   return result.stdout
 }
@@ -388,7 +473,23 @@ for (const dataset of datasets) {
     })
   }
 }
+assertCyclicFrontier(rows, datasets)
 
 mkdirSync(RESULTS_DIR, { recursive: true })
 writeFileSync(REPORT_PATH, renderReport(rows))
 console.log(`wrote ${REPORT_PATH}`)
+
+function assertCyclicFrontier(rows, datasets) {
+  const cyclicDatasets = new Set(datasets.filter((dataset) => dataset.cyclicFrontier).map((dataset) => dataset.name))
+  const failures = rows
+    .filter((row) => cyclicDatasets.has(row.dataset))
+    .filter((row) => row.format === 'toon-ext-cyclic-discriminated-arrays' || row.format === 'toon-rust-ext-cyclic-discriminated-arrays')
+    .filter((row) => row.deltaTokens > CYCLIC_FRONTIER_MAX_TOKENS_VS_JSON)
+
+  if (failures.length > 0) {
+    const details = failures
+      .map((row) => `${row.dataset} ${row.format}: ${row.vsJson}`)
+      .join('\n')
+    throw new Error(`cyclic discriminated-array token frontier regressed:\n${details}`)
+  }
+}
