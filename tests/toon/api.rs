@@ -2,9 +2,9 @@
 //! the encoder and the error paths that the spec corpus does not reach on its own.
 
 use reddb_io_toon::{
-    close_transform_stream, encode_toonl_values, jsonl_to_toonl, toonl_to_jsonl, Array, Document,
-    ParseOptions, ToonlCursor, ToonlCursorInvalidation, ToonlEncoder, ToonlReader,
-    ToonlResumeError, ToonlWriter, Value,
+    close_transform_stream, close_transform_stream_interleaved, encode_toonl_values,
+    jsonl_to_toonl, toonl_to_jsonl, Array, Document, ParseOptions, ToonlCursor,
+    ToonlCursorInvalidation, ToonlEncoder, ToonlReader, ToonlResumeError, ToonlWriter, Value,
 };
 use serde_json::json;
 
@@ -377,11 +377,11 @@ fn toonl_record_encoders_canonicalize_shuffled_shape_field_order() {
 
 #[test]
 fn toonl_writer_interleaves_tagged_lanes_and_rejects_overflow_before_writing() {
-    let req_one = Value::from_json_str(r#"{"method":"GET","path":"/health","status":200}"#)
-        .expect("req row");
+    let req_one =
+        Value::from_json_str(r#"{"method":"GET","path":"/health","status":200}"#).expect("req row");
     let metric_one = Value::from_json_str(r#"{"name":"cpu","value":0.42}"#).expect("metric row");
-    let req_two = Value::from_json_str(r#"{"status":401,"path":"/login","method":"POST"}"#)
-        .expect("req row");
+    let req_two =
+        Value::from_json_str(r#"{"status":401,"path":"/login","method":"POST"}"#).expect("req row");
     let metric_two = Value::from_json_str(r#"{"value":0.55,"name":"cpu"}"#).expect("metric row");
 
     let mut output = Vec::new();
@@ -416,7 +416,19 @@ fn toonl_writer_interleaves_tagged_lanes_and_rejects_overflow_before_writing() {
     let rows = ToonlReader::new(std::io::Cursor::new(output.as_bytes()))
         .collect::<Result<Vec<_>, _>>()
         .expect("tagged rows decode");
-    assert_eq!(rows, vec![req_one, metric_one, req_two, metric_two]);
+    let req_two_wire_order =
+        Value::from_json_str(r#"{"method":"POST","path":"/login","status":401}"#).expect("req row");
+    let metric_two_wire_order =
+        Value::from_json_str(r#"{"name":"cpu","value":0.55}"#).expect("metric row");
+    assert_eq!(
+        rows,
+        vec![
+            req_one,
+            metric_one,
+            req_two_wire_order,
+            metric_two_wire_order
+        ]
+    );
 
     let mut writer = ToonlWriter::new(Vec::new());
     for tag in ["a", "b", "c", "d", "e", "f", "g", "h"] {
@@ -459,6 +471,41 @@ fn streaming_bridges_round_trip_jsonl_toonl_jsonl_and_close_documents() {
         String::from_utf8(documents).unwrap(),
         "[1]{id,name}:\n  1,Ada\n[1]{id,name,role}:\n  2,Linus,dev\n"
     );
+}
+
+#[test]
+fn close_transform_interleaved_preserves_tagged_row_runs() {
+    let toonl =
+        b"[]<req>{method,path,status}:\n[]<metric>{name,value}:\nreq:GET,/health,200\nmetric:cpu,0.42\nreq:POST,/login,401\n";
+
+    let mut documents = Vec::new();
+    close_transform_stream(lines(toonl), &mut documents).expect("close transform");
+    assert_eq!(
+        String::from_utf8(documents).unwrap(),
+        "[2]{method,path,status}:\n  GET,/health,200\n  POST,/login,401\n[1]{name,value}:\n  cpu,0.42\n"
+    );
+
+    let mut interleaved = Vec::new();
+    close_transform_stream_interleaved(lines(toonl), &mut interleaved)
+        .expect("interleaved close transform");
+    assert_eq!(
+        String::from_utf8(interleaved).unwrap(),
+        "[1]{method,path,status}:\n  GET,/health,200\n[1]{name,value}:\n  cpu,0.42\n[1]{method,path,status}:\n  POST,/login,401\n"
+    );
+}
+
+#[test]
+fn close_transform_interleaved_keeps_anonymous_streams_byte_identical() {
+    let toonl = b"[]{id,name}:\n1,Ada\n[=1]\n[|]{id|name}:\n2|Linus\n[=1]\n";
+
+    let mut documents = Vec::new();
+    close_transform_stream(lines(toonl), &mut documents).expect("close transform");
+
+    let mut interleaved = Vec::new();
+    close_transform_stream_interleaved(lines(toonl), &mut interleaved)
+        .expect("interleaved close transform");
+
+    assert_eq!(interleaved, documents);
 }
 
 // ---------------------------------------------------------------------------
