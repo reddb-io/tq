@@ -61,6 +61,33 @@ test('decodeLines yields one record per row, following schema rotation', async (
   ])
 })
 
+test('decodeLines yields tagged rows in wire order', async () => {
+  const stream =
+    '[]{event}:\n[]<req>{method,path,status}:\nstarted\nreq:GET,/health,200\nfinished\nreq:POST,/login,401\n'
+
+  assert.deepEqual(await collect(stream), [
+    { event: 'started' },
+    { method: 'GET', path: '/health', status: 200 },
+    { event: 'finished' },
+    { method: 'POST', path: '/login', status: 401 },
+  ])
+})
+
+test('decodeLines rejects unknown tags and tagged lane overflow', async () => {
+  await assert.rejects(
+    () => collect('[]<req>{method,path}:\nmetric:cpu,0.42\n'),
+    /unknown tag/,
+  )
+
+  await assert.rejects(
+    () =>
+      collect(
+        '[]<a>{v}:\n[]<b>{v}:\n[]<c>{v}:\n[]<d>{v}:\n[]<e>{v}:\n[]<f>{v}:\n[]<g>{v}:\n[]<h>{v}:\n[]<i>{v}:\n',
+      ),
+    /too many tagged lanes/,
+  )
+})
+
 test('decodeLines tolerates blank lines and a segment left open at EOF', async () => {
   assert.deepEqual(await collect('\n[|]{id|name}:\n1|Ada\n\n2|Linus\n'), [
     { id: 1, name: 'Ada' },
