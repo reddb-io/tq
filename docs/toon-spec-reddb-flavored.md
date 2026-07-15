@@ -1,6 +1,6 @@
 # TOON — reddb-io Flavored Specification
 
-**tl;dr.** This document specifies three opt-in extensions (nested tabular headers, keyed-map collapse, delimiter choice) and robustness features (depth guard, `detectTruncation` API) that reddb-io layers over TOON v3.3. All extensions decode always-on and fail closed, so output remains canonical TOON v3.3 by default. We thank the [toon-format](https://github.com/toon-format/spec) team and author Johann Schopplich for a standard clean enough to extend safely.
+**tl;dr.** This document specifies four opt-in extensions (nested tabular headers, keyed-map collapse, primitive-array columns, delimiter choice) and robustness features (depth guard, `detectTruncation` API) that reddb-io layers over TOON v3.3. All extensions decode always-on and fail closed, so output remains canonical TOON v3.3 by default. We thank the [toon-format](https://github.com/toon-format/spec) team and author Johann Schopplich for a standard clean enough to extend safely.
 
 ## Acknowledgment
 
@@ -39,6 +39,7 @@ RECOMMENDED, MAY, and OPTIONAL are to be interpreted as described in RFC 2119.
 - [Extension 1 — Nested tabular headers](#extension-1--nested-tabular-headers)
 - [Extension 2 — Keyed-map collapse](#extension-2--keyed-map-collapse)
   - [The entry-count guardrail and its trade-off](#the-entry-count-guardrail-and-its-trade-off)
+- [Extension 3 — Primitive-array columns](#extension-3--primitive-array-columns)
 - [Delimiter choice](#delimiter-choice)
 - [Depth guard](#depth-guard)
 - [detectTruncation — structured completeness reports](#detecttruncation--structured-completeness-reports)
@@ -90,11 +91,11 @@ form errors loudly instead of quietly reading a different shape.
 
 ### Enabling emission, per surface
 
-| Surface | Active delimiter | Nested tabular headers | Keyed-map collapse |
-| --- | --- | --- | --- |
-| JS — `serialize(value, opts)` | `{ delimiter: ',' \| '\t' \| '\|' }` | `{ nestedTabularHeaders: true }` | `{ keyedMapCollapse: true }` |
-| Rust — `to_toon_with_options(EncodeOptions)` | `delimiter: ',' \| '\t' \| '\|'` | `nested_tabular_headers: true` | `keyed_map_collapse: true` |
-| `tq` (TOON output) | `--delimiter comma\|tab\|pipe` | `--nested-tabular-headers` | `--keyed-map-collapse` |
+| Surface | Active delimiter | Nested tabular headers | Keyed-map collapse | Primitive-array columns |
+| --- | --- | --- | --- | --- |
+| JS — `serialize(value, opts)` | `{ delimiter: ',' \| '\t' \| '\|' }` | `{ nestedTabularHeaders: true }` | `{ keyedMapCollapse: true }` | `{ primitiveArrayColumns: true }` |
+| Rust — `to_toon_with_options(EncodeOptions)` | `delimiter: ',' \| '\t' \| '\|'` | `nested_tabular_headers: true` | `keyed_map_collapse: true` | `primitive_array_columns: true` |
+| `tq` (TOON output) | `--delimiter comma\|tab\|pipe` | `--nested-tabular-headers` | `--keyed-map-collapse` | `--primitive-array-columns` |
 
 Delimiter choice is pure TOON v3.3 for arrays and tabular rows: encoders emit the active-delimiter declaration in the header (`[N|]`, `[N\t]`, and matching field lists) and quote cells that contain the active delimiter. The keyed-map collapse extension mirrors that declaration at the start of its field list, for example `map{|id|name}:`, so extension rows remain self-describing.
 
@@ -239,6 +240,62 @@ emitting maps of size one never sees the collapsed form even with the option on;
 this is intentional and keeps the encoder's output stable and predictable rather
 than flipping shape at a size-one boundary. Round-trip is lossless either way,
 because a non-collapsed map is just standard v3.3.
+
+## Extension 3 — Primitive-array columns
+
+Uniform object arrays sometimes contain fields whose values are arrays of
+primitive scalars. TOON v3.3 cannot keep that containing array tabular, because
+the array-valued field is not itself primitive. This extension lets an otherwise
+tabular object array declare such a field as a primitive-list cell:
+
+```toon
+items[2]{id,tags[;],quantity}:
+  item_0001,hazmat;oversize,60
+  item_0002,oversize,11
+```
+
+This decodes to:
+
+```json
+{"items":[{"id":"item_0001","tags":["hazmat","oversize"],"quantity":60},{"id":"item_0002","tags":["oversize"],"quantity":11}]}
+```
+
+Grammar:
+
+- In an array field header, `field[;]` declares `field` as a primitive-list cell.
+- The bracket content is the in-cell sub-delimiter. The encoder currently emits
+  `;`, which is valid with every active row delimiter (`comma`, `tab`, or `pipe`).
+- Row cells still use the array header's active row delimiter. The list
+  sub-delimiter splits only inside that one field's cell.
+- Empty arrays encode as an empty cell.
+
+Eligibility is deterministic. An encoder with the option enabled emits this form
+only when **all** of the following hold:
+
+1. the containing array is eligible for normal tabular encoding except for one or
+   more primitive-list fields;
+2. every primitive-list field value is an array;
+3. every item in those arrays is a primitive scalar: string, number, boolean, or
+   null; and
+4. the list sub-delimiter differs from the active row delimiter.
+
+Null list fields, mixed scalar/object list items, sparse rows, and heterogeneous
+object shapes fall back to ordinary TOON v3.3. The encoder MUST NOT raise an
+error for ordinary ineligible data.
+
+Quoting follows the scalar cell rules. A string item is quoted when it would need
+quoting as an ordinary row cell, or when it contains the list sub-delimiter. For
+example:
+
+```toon
+items[1]{id,tags[;]}:
+  1,"semi;quoted";plain
+```
+
+The parent `[N]` row count still checks the number of rows, and the `{fields}`
+list still checks row width. The primitive-list declaration adds a type and
+sub-delimiter check, but it does not declare each list cell's item count. A
+malformed quoted subcell is still rejected by the quote scanner.
 
 ## Delimiter choice
 
