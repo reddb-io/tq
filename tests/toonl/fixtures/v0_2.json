@@ -55,6 +55,18 @@
       "expected": "[]{id,name}:\n1,Ada\n2,Linus\n[~]{id,name}:\n3,Grace\n[=3]\n"
     },
     {
+      "name": "encode/tagged-row-interleaved-lanes",
+      "kind": "encode-tagged-records",
+      "operations": [
+        { "tag": "req", "record": { "method": "GET", "path": "/health", "status": 200 } },
+        { "tag": "metric", "record": { "name": "cpu", "value": 0.42 } },
+        { "tag": "req", "record": { "status": 401, "path": "/login", "method": "POST" } },
+        { "tag": "metric", "record": { "value": 0.55, "name": "cpu" } },
+        { "tag": "req", "record": { "method": "POST", "path": "/login", "status": 200, "duration_ms": 32 } }
+      ],
+      "expected": "[]<req>{method,path,status}:\nreq:GET,/health,200\n[]<metric>{name,value}:\nmetric:cpu,0.42\nreq:POST,/login,401\nmetric:cpu,0.55\n[]<req>{method,path,status,duration_ms}:\nreq:POST,/login,200,32\n"
+    },
+    {
       "name": "error/continuation-before-header",
       "kind": "error",
       "input": "[~]{id,name}:\n1,Ada\n",

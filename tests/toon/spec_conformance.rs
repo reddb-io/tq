@@ -1,4 +1,6 @@
-use reddb_io_toon::{encode_toonl_values, ParseOptions, ToonlEncoder, ToonlStream, Value};
+use reddb_io_toon::{
+    encode_toonl_values, ParseOptions, ToonlEncoder, ToonlStream, ToonlWriter, Value,
+};
 use serde_json::Value as Json;
 use std::collections::BTreeSet;
 use std::fs;
@@ -180,6 +182,17 @@ fn toonl_fixtures_are_executable_spec_examples() {
                         .expect("encode expected");
                     assert_eq!(
                         encode_toonl_records_fixture(test),
+                        expected,
+                        "{name}: encoded"
+                    );
+                }
+                "encode-tagged-records" => {
+                    let expected = test
+                        .get("expected")
+                        .and_then(Json::as_str)
+                        .expect("encode expected");
+                    assert_eq!(
+                        encode_tagged_toonl_records_fixture(test),
                         expected,
                         "{name}: encoded"
                     );
@@ -400,6 +413,33 @@ fn encode_toonl_records_fixture(test: &Json) -> String {
         .collect::<Vec<_>>();
 
     encode_toonl_values(&records).expect("valid TOONL records")
+}
+
+fn encode_tagged_toonl_records_fixture(test: &Json) -> String {
+    let mut output = Vec::new();
+    {
+        let mut writer = ToonlWriter::new(&mut output);
+        let operations = test
+            .get("operations")
+            .and_then(Json::as_array)
+            .expect("tagged encode operations");
+        for operation in operations {
+            let tag = operation
+                .get("tag")
+                .and_then(Json::as_str)
+                .expect("tagged encode tag");
+            let record = operation
+                .get("record")
+                .cloned()
+                .map(Value::from_json_value)
+                .expect("tagged encode record");
+            writer
+                .write_tagged_record(tag, &record)
+                .expect("valid tagged TOONL record");
+        }
+        writer.finish().expect("finish tagged writer");
+    }
+    String::from_utf8(output).expect("TOONL is UTF-8")
 }
 
 fn read_fixture(path: &Path) -> Json {
