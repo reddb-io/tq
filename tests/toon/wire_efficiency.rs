@@ -28,6 +28,10 @@ fn wire_efficiency_corpora_assert_encoded_byte_sizes_for_rust() {
         let json_min = serde_json::to_string(&value).expect("compact JSON");
         let toon_value = Value::from_json_value(value.clone());
         let toon_v3 = toon_value.to_canonical_toon();
+        let toon_tab = toon_value.to_toon_with_options(EncodeOptions {
+            delimiter: '\t',
+            ..EncodeOptions::default()
+        });
         let toon_ext = toon_value.to_toon_with_options(ext_options());
 
         assert_eq!(
@@ -41,6 +45,11 @@ fn wire_efficiency_corpora_assert_encoded_byte_sizes_for_rust() {
             "{name}: TOON v3 bytes"
         );
         assert_eq!(
+            toon_tab.len(),
+            expected["toonTab"].as_u64().expect("TOON tab byte count") as usize,
+            "{name}: TOON tab bytes"
+        );
+        assert_eq!(
             toon_ext.len(),
             expected["toonExt"].as_u64().expect("TOON+ext byte count") as usize,
             "{name}: TOON+ext bytes"
@@ -51,6 +60,13 @@ fn wire_efficiency_corpora_assert_encoded_byte_sizes_for_rust() {
                 .to_json_value(),
             value,
             "{name}: TOON v3 round trip"
+        );
+        assert_eq!(
+            Value::parse_toon(&toon_tab)
+                .unwrap_or_else(|err| panic!("{name}: TOON tab parse: {err}"))
+                .to_json_value(),
+            value,
+            "{name}: TOON tab round trip"
         );
         assert_eq!(
             Value::parse_toon(&toon_ext)
