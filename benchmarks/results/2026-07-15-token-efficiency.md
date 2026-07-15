@@ -4,60 +4,142 @@ Command: `pnpm benchmark:tokens`
 
 Tokenizer: `o200k_base` via `gpt-tokenizer`.
 
+Representative datasets are vendored under `benchmarks/datasets/` and are read offline. Wire fixtures are retained as an extension-eligibility showcase, not as representative payload evidence.
+
+## Representative Corpus by Shape
+
+| Shape | Datasets | Best TOON-family median vs JSON | Best non-TOON median vs JSON |
+| --- | ---: | ---: | ---: |
+| deep-tree | 1 | toon-ext-all (-22.7%) | yaml (35.6%) |
+| flat-tabular | 1 | toonl (-43.6%) | csv (-44.8%) |
+| nested-heterogeneous | 1 | toon-ext-all (13.9%) | yaml (47.9%) |
+| nested-uniform | 1 | toon-ext-all (-25.7%) | yaml (39.9%) |
+| streaming-append | 1 | toonl (-29.7%) | csv (-31.8%) |
+| tagged-records | 1 | toon-ext-all (19.4%) | yaml (38.0%) |
+| wide-sparse | 1 | toonl (-8.4%) | csv (-14.0%) |
+
+## Explicit TOON/TOONL Losses
+
+| Shape | Dataset | Format | Tokens vs minified JSON |
+| --- | --- | --- | ---: |
+| deep-tree | deep-tree/wikidata-knowledge-tree | toon-v3.3-canonical | 12.3% |
+| deep-tree | deep-tree/wikidata-knowledge-tree | toon-ext-primitive-array-columns | 12.3% |
+| deep-tree | deep-tree/wikidata-knowledge-tree | toon-ext-child-tables | 12.3% |
+| deep-tree | deep-tree/wikidata-knowledge-tree | toon-ext-delimiter-pipe | 15.3% |
+| deep-tree | deep-tree/wikidata-knowledge-tree | toon-ext-keyed-map-collapse | 12.3% |
+| nested-heterogeneous | nested-heterogeneous/json-schema-event | toon-v3.3-canonical | 13.9% |
+| nested-heterogeneous | nested-heterogeneous/json-schema-event | toon-ext-primitive-array-columns | 13.9% |
+| nested-heterogeneous | nested-heterogeneous/json-schema-event | toon-ext-child-tables | 13.9% |
+| nested-heterogeneous | nested-heterogeneous/json-schema-event | toon-ext-delimiter-pipe | 16.8% |
+| nested-heterogeneous | nested-heterogeneous/json-schema-event | toon-ext-keyed-map-collapse | 13.9% |
+| nested-heterogeneous | nested-heterogeneous/json-schema-event | toon-ext-all | 13.9% |
+| nested-uniform | nested-uniform/openapi-petstore-paths | toon-v3.3-canonical | 10.1% |
+| nested-uniform | nested-uniform/openapi-petstore-paths | toon-ext-primitive-array-columns | 10.1% |
+| nested-uniform | nested-uniform/openapi-petstore-paths | toon-ext-delimiter-pipe | 12.7% |
+| nested-uniform | nested-uniform/openapi-petstore-paths | toon-ext-keyed-map-collapse | 10.1% |
+| tagged-records | tagged-records/activity-events | toon-v3.3-canonical | 19.4% |
+| tagged-records | tagged-records/activity-events | toon-ext-primitive-array-columns | 19.4% |
+| tagged-records | tagged-records/activity-events | toon-ext-child-tables | 19.4% |
+| tagged-records | tagged-records/activity-events | toon-ext-delimiter-pipe | 21.3% |
+| tagged-records | tagged-records/activity-events | toon-ext-keyed-map-collapse | 19.4% |
+| tagged-records | tagged-records/activity-events | toon-ext-all | 19.4% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | toon-v3.3-canonical | 19.2% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | toon-ext-primitive-array-columns | 19.2% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | toon-ext-child-tables | 19.2% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | toon-ext-delimiter-pipe | 19.6% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | toon-ext-keyed-map-collapse | 19.2% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | toon-ext-all | 19.2% |
+
+## Representative Dataset Measurements
+
+| Shape | Dataset | Format | Bytes | Tokens | Tokens vs minified JSON |
+| --- | --- | --- | ---: | ---: | ---: |
+| deep-tree | deep-tree/wikidata-knowledge-tree | json-minified | 557 | 163 | 0.0% |
+| deep-tree | deep-tree/wikidata-knowledge-tree | json-pretty | 1460 | 297 | 82.2% |
+| deep-tree | deep-tree/wikidata-knowledge-tree | yaml | 1008 | 221 | 35.6% |
+| deep-tree | deep-tree/wikidata-knowledge-tree | xml | 816 | 249 | 52.8% |
+| deep-tree | deep-tree/wikidata-knowledge-tree | toon-v3.3-canonical | 893 | 183 | 12.3% |
+| deep-tree | deep-tree/wikidata-knowledge-tree | toon-ext-primitive-array-columns | 893 | 183 | 12.3% |
+| deep-tree | deep-tree/wikidata-knowledge-tree | toon-ext-child-tables | 893 | 183 | 12.3% |
+| deep-tree | deep-tree/wikidata-knowledge-tree | toon-ext-delimiter-pipe | 898 | 188 | 15.3% |
+| deep-tree | deep-tree/wikidata-knowledge-tree | toon-ext-keyed-map-collapse | 893 | 183 | 12.3% |
+| deep-tree | deep-tree/wikidata-knowledge-tree | toon-ext-all | 409 | 126 | -22.7% |
+| flat-tabular | flat-tabular/public-repositories | json-minified | 1009 | 250 | 0.0% |
+| flat-tabular | flat-tabular/public-repositories | json-pretty | 1461 | 410 | 64.0% |
+| flat-tabular | flat-tabular/public-repositories | yaml | 1168 | 344 | 37.6% |
+| flat-tabular | flat-tabular/public-repositories | xml | 1489 | 379 | 51.6% |
+| flat-tabular | flat-tabular/public-repositories | toon-v3.3-canonical | 456 | 146 | -41.6% |
+| flat-tabular | flat-tabular/public-repositories | toon-ext-primitive-array-columns | 456 | 146 | -41.6% |
+| flat-tabular | flat-tabular/public-repositories | toon-ext-child-tables | 456 | 146 | -41.6% |
+| flat-tabular | flat-tabular/public-repositories | toon-ext-delimiter-pipe | 457 | 162 | -35.2% |
+| flat-tabular | flat-tabular/public-repositories | toon-ext-keyed-map-collapse | 456 | 146 | -41.6% |
+| flat-tabular | flat-tabular/public-repositories | toon-ext-all | 456 | 146 | -41.6% |
+| flat-tabular | flat-tabular/public-repositories | jsonl | 991 | 251 | 0.4% |
+| flat-tabular | flat-tabular/public-repositories | csv | 426 | 138 | -44.8% |
+| flat-tabular | flat-tabular/public-repositories | toonl | 436 | 141 | -43.6% |
+| nested-heterogeneous | nested-heterogeneous/json-schema-event | json-minified | 1621 | 447 | 0.0% |
+| nested-heterogeneous | nested-heterogeneous/json-schema-event | json-pretty | 3404 | 827 | 85.0% |
+| nested-heterogeneous | nested-heterogeneous/json-schema-event | yaml | 2417 | 661 | 47.9% |
+| nested-heterogeneous | nested-heterogeneous/json-schema-event | xml | 2374 | 711 | 59.1% |
+| nested-heterogeneous | nested-heterogeneous/json-schema-event | toon-v3.3-canonical | 1966 | 509 | 13.9% |
+| nested-heterogeneous | nested-heterogeneous/json-schema-event | toon-ext-primitive-array-columns | 1966 | 509 | 13.9% |
+| nested-heterogeneous | nested-heterogeneous/json-schema-event | toon-ext-child-tables | 1966 | 509 | 13.9% |
+| nested-heterogeneous | nested-heterogeneous/json-schema-event | toon-ext-delimiter-pipe | 1975 | 522 | 16.8% |
+| nested-heterogeneous | nested-heterogeneous/json-schema-event | toon-ext-keyed-map-collapse | 1966 | 509 | 13.9% |
+| nested-heterogeneous | nested-heterogeneous/json-schema-event | toon-ext-all | 1966 | 509 | 13.9% |
+| nested-uniform | nested-uniform/openapi-petstore-paths | json-minified | 1185 | 268 | 0.0% |
+| nested-uniform | nested-uniform/openapi-petstore-paths | json-pretty | 1871 | 450 | 67.9% |
+| nested-uniform | nested-uniform/openapi-petstore-paths | yaml | 1473 | 375 | 39.9% |
+| nested-uniform | nested-uniform/openapi-petstore-paths | xml | 1679 | 408 | 52.2% |
+| nested-uniform | nested-uniform/openapi-petstore-paths | toon-v3.3-canonical | 1118 | 295 | 10.1% |
+| nested-uniform | nested-uniform/openapi-petstore-paths | toon-ext-primitive-array-columns | 1118 | 295 | 10.1% |
+| nested-uniform | nested-uniform/openapi-petstore-paths | toon-ext-child-tables | 728 | 199 | -25.7% |
+| nested-uniform | nested-uniform/openapi-petstore-paths | toon-ext-delimiter-pipe | 1125 | 302 | 12.7% |
+| nested-uniform | nested-uniform/openapi-petstore-paths | toon-ext-keyed-map-collapse | 1118 | 295 | 10.1% |
+| nested-uniform | nested-uniform/openapi-petstore-paths | toon-ext-all | 728 | 199 | -25.7% |
+| streaming-append | streaming-append/append-only-logs | json-minified | 852 | 286 | 0.0% |
+| streaming-append | streaming-append/append-only-logs | json-pretty | 1256 | 440 | 53.8% |
+| streaming-append | streaming-append/append-only-logs | yaml | 993 | 380 | 32.9% |
+| streaming-append | streaming-append/append-only-logs | xml | 1183 | 416 | 45.5% |
+| streaming-append | streaming-append/append-only-logs | toon-v3.3-canonical | 465 | 212 | -25.9% |
+| streaming-append | streaming-append/append-only-logs | toon-ext-primitive-array-columns | 465 | 212 | -25.9% |
+| streaming-append | streaming-append/append-only-logs | toon-ext-child-tables | 465 | 212 | -25.9% |
+| streaming-append | streaming-append/append-only-logs | toon-ext-delimiter-pipe | 466 | 214 | -25.2% |
+| streaming-append | streaming-append/append-only-logs | toon-ext-keyed-map-collapse | 465 | 212 | -25.9% |
+| streaming-append | streaming-append/append-only-logs | toon-ext-all | 465 | 212 | -25.9% |
+| streaming-append | streaming-append/append-only-logs | jsonl | 839 | 287 | 0.3% |
+| streaming-append | streaming-append/append-only-logs | csv | 428 | 195 | -31.8% |
+| streaming-append | streaming-append/append-only-logs | toonl | 450 | 201 | -29.7% |
+| tagged-records | tagged-records/activity-events | json-minified | 697 | 216 | 0.0% |
+| tagged-records | tagged-records/activity-events | json-pretty | 1135 | 350 | 62.0% |
+| tagged-records | tagged-records/activity-events | yaml | 869 | 298 | 38.0% |
+| tagged-records | tagged-records/activity-events | xml | 990 | 321 | 48.6% |
+| tagged-records | tagged-records/activity-events | toon-v3.3-canonical | 759 | 258 | 19.4% |
+| tagged-records | tagged-records/activity-events | toon-ext-primitive-array-columns | 759 | 258 | 19.4% |
+| tagged-records | tagged-records/activity-events | toon-ext-child-tables | 759 | 258 | 19.4% |
+| tagged-records | tagged-records/activity-events | toon-ext-delimiter-pipe | 763 | 262 | 21.3% |
+| tagged-records | tagged-records/activity-events | toon-ext-keyed-map-collapse | 759 | 258 | 19.4% |
+| tagged-records | tagged-records/activity-events | toon-ext-all | 759 | 258 | 19.4% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | json-minified | 877 | 286 | 0.0% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | json-pretty | 1255 | 423 | 47.9% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | yaml | 1009 | 372 | 30.1% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | xml | 1436 | 476 | 66.4% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | toon-v3.3-canonical | 942 | 341 | 19.2% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | toon-ext-primitive-array-columns | 942 | 341 | 19.2% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | toon-ext-child-tables | 942 | 341 | 19.2% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | toon-ext-delimiter-pipe | 943 | 342 | 19.6% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | toon-ext-keyed-map-collapse | 942 | 341 | 19.2% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | toon-ext-all | 942 | 341 | 19.2% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | jsonl | 863 | 286 | 0.0% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | csv | 803 | 246 | -14.0% |
+| wide-sparse | wide-sparse/sparse-feature-vectors | toonl | 779 | 262 | -8.4% |
+
+## Wire Extension-Eligibility Showcase
+
+These `wire-*` fixtures exercise opt-in extension behavior and edge cases. They are not representative corpus evidence.
+
 | Dataset | Format | Bytes | Tokens | Tokens vs minified JSON |
 | --- | --- | ---: | ---: | ---: |
-| upstream-github-repos | json-minified | 11646 | 3524 | 0.0% |
-| upstream-github-repos | json-pretty | 18614 | 6048 | 71.6% |
-| upstream-github-repos | yaml | 14163 | 5082 | 44.2% |
-| upstream-github-repos | xml | 16823 | 5448 | 54.6% |
-| upstream-github-repos | toon-v3.3-canonical | 4966 | 2096 | -40.5% |
-| upstream-github-repos | toon-ext-primitive-array-columns | 4966 | 2096 | -40.5% |
-| upstream-github-repos | toon-ext-child-tables | 4966 | 2096 | -40.5% |
-| upstream-github-repos | toon-ext-delimiter-pipe | 4967 | 2218 | -37.1% |
-| upstream-github-repos | toon-ext-keyed-map-collapse | 4966 | 2096 | -40.5% |
-| upstream-github-repos | toon-ext-all | 4966 | 2096 | -40.5% |
-| upstream-github-repos | jsonl | 11635 | 3639 | 3.3% |
-| upstream-github-repos | csv | 4713 | 1970 | -44.1% |
-| upstream-github-repos | toonl | 4725 | 1857 | -47.3% |
-| upstream-analytics | json-minified | 22734 | 8459 | 0.0% |
-| upstream-analytics | json-pretty | 34742 | 12783 | 51.1% |
-| upstream-analytics | yaml | 27051 | 10857 | 28.3% |
-| upstream-analytics | xml | 32835 | 12063 | 42.6% |
-| upstream-analytics | toon-v3.3-canonical | 10533 | 6070 | -28.2% |
-| upstream-analytics | toon-ext-primitive-array-columns | 10533 | 6070 | -28.2% |
-| upstream-analytics | toon-ext-child-tables | 10533 | 6070 | -28.2% |
-| upstream-analytics | toon-ext-delimiter-pipe | 10534 | 6072 | -28.2% |
-| upstream-analytics | toon-ext-keyed-map-collapse | 10533 | 6070 | -28.2% |
-| upstream-analytics | toon-ext-all | 10533 | 6070 | -28.2% |
-| upstream-analytics | jsonl | 22719 | 8694 | 2.8% |
-| upstream-analytics | csv | 9556 | 5345 | -36.8% |
-| upstream-analytics | toonl | 10048 | 5831 | -31.1% |
-| upstream-orders | json-minified | 29339 | 10940 | 0.0% |
-| upstream-orders | json-pretty | 63547 | 19944 | 82.3% |
-| upstream-orders | yaml | 45176 | 17058 | 55.9% |
-| upstream-orders | xml | 46997 | 17964 | 64.2% |
-| upstream-orders | toon-v3.3-canonical | 26820 | 11748 | 7.4% |
-| upstream-orders | toon-ext-primitive-array-columns | 26820 | 11748 | 7.4% |
-| upstream-orders | toon-ext-child-tables | 13726 | 7296 | -33.3% |
-| upstream-orders | toon-ext-delimiter-pipe | 27181 | 12109 | 10.7% |
-| upstream-orders | toon-ext-keyed-map-collapse | 26820 | 11748 | 7.4% |
-| upstream-orders | toon-ext-all | 13726 | 7296 | -33.3% |
-| upstream-orders | jsonl | 14663 | 5185 | -52.6% |
-| upstream-orders | csv | 6409 | 2795 | -74.5% |
-| upstream-orders | toonl | 6421 | 2801 | -74.4% |
-| streaming-logs | json-minified | 32475 | 10953 | 0.0% |
-| streaming-logs | json-pretty | 47483 | 16657 | 52.1% |
-| streaming-logs | yaml | 37872 | 14851 | 35.6% |
-| streaming-logs | xml | 42391 | 15457 | 41.1% |
-| streaming-logs | toon-v3.3-canonical | 17509 | 8190 | -25.2% |
-| streaming-logs | toon-ext-primitive-array-columns | 17509 | 8190 | -25.2% |
-| streaming-logs | toon-ext-child-tables | 17509 | 8190 | -25.2% |
-| streaming-logs | toon-ext-delimiter-pipe | 17510 | 8265 | -24.5% |
-| streaming-logs | toon-ext-keyed-map-collapse | 17509 | 8190 | -25.2% |
-| streaming-logs | toon-ext-all | 17509 | 8190 | -25.2% |
-| streaming-logs | jsonl | 32465 | 11248 | 2.7% |
-| streaming-logs | csv | 16297 | 7585 | -30.7% |
-| streaming-logs | toonl | 16909 | 7891 | -28.0% |
 | wire-shipments-500 | json-minified | 54164 | 16412 | 0.0% |
 | wire-shipments-500 | json-pretty | 83172 | 26916 | 64.0% |
 | wire-shipments-500 | yaml | 64661 | 23410 | 42.6% |
