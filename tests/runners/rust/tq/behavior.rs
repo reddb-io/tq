@@ -248,6 +248,11 @@ fn reports_argument_and_input_errors() {
     let usage = "usage: tq";
 
     assert_error(&["-o", "yaml", "."], SAMPLE, "unsupported format `yaml`");
+    assert_error(
+        &["--delimiter", "semicolon", "."],
+        SAMPLE,
+        "unsupported delimiter; expected comma, tab, or pipe",
+    );
     // A format flag with nothing after it.
     assert_error(&["-p"], SAMPLE, usage);
     // An unknown flag, no query at all, and too many positionals.
@@ -262,6 +267,7 @@ fn reports_argument_and_input_errors() {
     );
     // Malformed input in either format.
     assert_error(&["-p", "json", "."], "{not json", "key must be a string");
+    assert_error(&["-p", "yaml", "."], "name: [\n", "did not find expected");
     assert_error(&["."], "a: 1\n  b: 2\n", "invalid indentation");
 }
 
@@ -277,6 +283,64 @@ fn yaml_input_defaults_to_toon_output() {
     assert_eq!(
         String::from_utf8(output.stdout).expect("stdout is utf-8"),
         "name: Ada\nactive: true\n"
+    );
+}
+
+#[test]
+fn yaml_input_preserves_order_and_is_detected_from_file_extension() {
+    let mut path = temp_file("tq-input-order");
+    path.set_extension("yaml");
+    std::fs::write(&path, "zeta: last\nalpha: first\nnested:\n  b: 1\n  a: 2\n")
+        .expect("write yaml input");
+
+    let detected = run_tq(&["-o", "toon", ".", path.to_str().unwrap()], "");
+    assert_eq!(
+        detected.status.code(),
+        Some(0),
+        "YAML file exits cleanly: {}",
+        String::from_utf8_lossy(&detected.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(detected.stdout).expect("stdout is utf-8"),
+        "zeta: last\nalpha: first\nnested:\n  b: 1\n  a: 2\n"
+    );
+
+    let queried = run_tq(&["-o", "json", "-c", ".nested", path.to_str().unwrap()], "");
+    assert_eq!(
+        queried.status.code(),
+        Some(0),
+        "YAML query exits cleanly: {}",
+        String::from_utf8_lossy(&queried.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(queried.stdout).expect("stdout is utf-8"),
+        "{\"b\":1,\"a\":2}\n"
+    );
+}
+
+#[test]
+fn check_command_accepts_toonl_and_rejects_yaml_inputs() {
+    let toonl = "[]{id,name}:\n1,Ada\n[=1]\n";
+    let report = run_tq(&["check", "-p", "toonl"], toonl);
+    assert_eq!(
+        report.status.code(),
+        Some(0),
+        "TOONL check exits cleanly: {}",
+        String::from_utf8_lossy(&report.stderr)
+    );
+    let stdout = String::from_utf8(report.stdout).expect("stdout is utf-8");
+    assert!(stdout.contains("\"complete\": true"));
+    assert!(stdout.contains("\"kind\": \"complete\""));
+
+    assert_error(&["check", "-p", "yaml"], "", "usage: tq check");
+    let mut path = temp_file("tq-check-input");
+    path.set_extension("yml");
+    std::fs::write(&path, "name: Ada\n").expect("write yaml input");
+    assert_error(&["check", path.to_str().unwrap()], "", "usage: tq check");
+    assert_error(
+        &["check", "-p", "toon", "a.toon", "b.toon"],
+        "",
+        "usage: tq check",
     );
 }
 
