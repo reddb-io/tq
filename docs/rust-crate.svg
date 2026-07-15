@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 220" width="1200" height="220" role="img" aria-labelledby="rust-title rust-desc">
+  <title id="rust-title">reddb-io-toon Rust crate</title>
+  <desc id="rust-desc">A compact banner for the Rust parser, serializer, and lazy document model.</desc>
+  <defs>
+    <linearGradient id="rust-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#07090d"/>
+    </linearGradient>
+    <radialGradient id="rust-glow" cx="0.2" cy="0.1" r="0.8">
+      <stop offset="0" stop-color="#ff2056" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#ff2056" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rust-rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff2056"/>
+      <stop offset="1" stop-color="#ff2056" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="rust-grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M24 0H0V24" fill="none" stroke="#ffffff" stroke-opacity="0.028" stroke-width="1"/>
+    </pattern>
+    <clipPath id="rust-frame">
+      <rect x="0" y="0" width="1200" height="220" rx="18"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#rust-frame)">
+    <rect width="1200" height="220" fill="url(#rust-bg)"/>
+    <rect width="1200" height="220" fill="url(#rust-grid)"/>
+    <ellipse cx="160" cy="20" rx="400" ry="210" fill="url(#rust-glow)"/>
+    <g font-family="ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace">
+      <text x="72" y="92" font-size="26" fill="#ff2056" letter-spacing="2">RUST CRATE</text>
+      <text x="72" y="142" font-size="56" font-weight="700" fill="#f0f6fc">reddb-io-toon</text>
+      <rect x="72" y="164" width="180" height="3" fill="url(#rust-rule)"/>
+      <text x="72" y="194" font-size="18" fill="#8b949e">parser, serializer, lazy values, truncation checks, and TOONL IO</text>
+      <rect x="764" y="54" width="324" height="112" rx="12" fill="#0b0f15" stroke="#ffffff" stroke-opacity="0.09"/>
+      <text x="788" y="90" font-size="15" fill="#6e7681">Cargo.toml</text>
+      <text x="788" y="126" font-size="24" fill="#c9d1d9">reddb-io-toon</text>
+      <text x="788" y="152" font-size="14" fill="#3fb950">same corpus as the package</text>
+    </g>
+    <rect x="0" y="216" width="1200" height="4" fill="#ff2056"/>
+  </g>
+</svg>
