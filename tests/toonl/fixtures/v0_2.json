@@ -163,6 +163,12 @@
       "expectedToonDocuments": [
         "[2]{method,path,status}:\n  GET,/health,200\n  POST,/login,401\n",
         "[2]{name,value}:\n  cpu,0.42\n  cpu,0.55\n"
+      ],
+      "expectedInterleavedToonDocuments": [
+        "[1]{method,path,status}:\n  GET,/health,200\n",
+        "[1]{name,value}:\n  cpu,0.42\n",
+        "[1]{method,path,status}:\n  POST,/login,401\n",
+        "[1]{name,value}:\n  cpu,0.55\n"
       ]
     },
     {

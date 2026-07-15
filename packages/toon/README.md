@@ -51,7 +51,8 @@ closeTransform(stream)
 
 - `encodeLines(options?)` — incremental emitter. The header is written lazily with the first record, a schema change rotates the segment automatically, and `end()` closes the last one. Field order is canonicalized per record shape using the first order seen for that shape, so shuffled object keys do not force a rotation. `delimiter` defaults to `','`; `trailer: false` leaves the stream trailer-free.
 - `decodeLines(source)` — async generator, one record per row. Takes a string or an (async) iterable of chunks, so a socket or file stream flows straight through. Follows schema rotation, skips blank lines, and checks every trailer against the rows actually seen.
-- `closeTransform(input)` — closes the stream: each segment becomes one length-bearing canonical TOON document.
+- `closeTransform(input)` — closes the stream in the default per-lane form: each lane segment becomes one length-bearing canonical TOON document.
+- `closeTransformInterleaved(input)` — closes a multiplexed stream while preserving row-run interleaving for post-mortem rendering.
 - `ToonlDecodeStream()` / `ToonlEncodeStream(options?)` — Web Streams API transforms for `string | Uint8Array` TOONL chunks and record objects.
 - `JsonlToToonl(options?)` / `ToonlToJsonl()` — line-by-line bridges between JSONL and TOONL.
 - `recordTransform(fn, options?)` — maps or filters records and emits TOONL, preserving schema rotation in the output stream. Return `undefined` or `null` to drop a record.
