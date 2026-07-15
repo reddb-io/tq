@@ -8,11 +8,12 @@ import { parse, serialize } from '../src/index.js'
 
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url))
 const FIXTURE_PATH = join(REPO_ROOT, 'tests/json-limits/corpus.json')
-const EXPECTED_CASE_COUNT = 24
+const EXPECTED_CASE_COUNT = 25
 const REQUIRED_CATEGORIES = new Set([
   'numbers',
   'strings-unicode',
   'structure',
+  'toon-decode',
   'adversarial-round-trip',
 ])
 
@@ -58,6 +59,16 @@ test('JSON limits corpus resolves consistently for the JS package', () => {
     const expected = testCase.expected.js
     categories.add(testCase.category)
     executed += 1
+
+    if (testCase.rawToon !== undefined) {
+      const actualRoundTrip = parse(testCase.rawToon)
+      const expectedRoundTrip = JSON.parse(expected.roundTripJson)
+      assert.ok(
+        jsonEqual(actualRoundTrip, expectedRoundTrip),
+        `${testCase.name}: expected TOON decode ${expected.roundTripJson}, got ${JSON.stringify(actualRoundTrip)}`,
+      )
+      continue
+    }
 
     if (expected.error !== undefined) {
       assert.throws(
