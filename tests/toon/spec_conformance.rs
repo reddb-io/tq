@@ -219,6 +219,36 @@ fn toonl_fixtures_are_executable_spec_examples() {
                         Value::parse_toon(&document)
                             .unwrap_or_else(|err| panic!("{name}: TOON output invalid: {err}"));
                     }
+                    if let Some(expected) = test
+                        .get("expectedInterleavedToonDocuments")
+                        .and_then(Json::as_array)
+                    {
+                        let actual = ToonlStream::parse(input)
+                            .and_then(|stream| stream.close_transform_interleaved_documents())
+                            .unwrap_or_else(|err| {
+                                panic!("{name}: interleaved close-transform failed: {err}")
+                            });
+                        let expected_strings = expected
+                            .iter()
+                            .map(|value| {
+                                value
+                                    .as_str()
+                                    .unwrap_or_else(|| {
+                                        panic!("{name}: expected interleaved TOON doc string")
+                                    })
+                                    .to_owned()
+                            })
+                            .collect::<Vec<_>>();
+                        assert_eq!(
+                            actual, expected_strings,
+                            "{name}: interleaved transformed docs"
+                        );
+                        for document in actual {
+                            Value::parse_toon(&document).unwrap_or_else(|err| {
+                                panic!("{name}: interleaved TOON output invalid: {err}")
+                            });
+                        }
+                    }
                 }
                 "error" => {
                     let expected = test
