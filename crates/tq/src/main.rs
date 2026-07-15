@@ -11,7 +11,7 @@ use reddb_io_toon::{
 };
 
 const USAGE: &str =
-    "usage: tq [-p toon|json|toonl|yaml|yml] [-o toon|json|toonl] [-r] [-c] [-s|--slurp] [--delimiter comma|tab|pipe] [--nested-tabular-headers] [--keyed-map-collapse] [--primitive-array-columns] [--object-array-columns] <query> [file]";
+    "usage: tq [-p toon|json|toonl|yaml|yml] [-o toon|json|toonl] [-r] [-c] [-s|--slurp] [--delimiter comma|tab|pipe] [--nested-tabular-headers] [--keyed-map-collapse] [--primitive-array-columns] [--object-array-columns] [--cyclic-discriminated-arrays] <query> [file]";
 const TRIM_USAGE: &str = "usage: tq trim --keep-last N [--in-place] [FILE]";
 const CLOSE_USAGE: &str = "usage: tq close [--per-lane|--interleaved] [FILE]";
 const CHECK_USAGE: &str = "usage: tq check [-p toon|toonl] [FILE]";
@@ -38,6 +38,7 @@ struct Options {
     keyed_map_collapse: bool,
     primitive_array_columns: bool,
     object_array_columns: bool,
+    cyclic_discriminated_arrays: bool,
 }
 
 #[derive(Debug)]
@@ -227,6 +228,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Options, String> {
     let mut keyed_map_collapse = false;
     let mut primitive_array_columns = false;
     let mut object_array_columns = false;
+    let mut cyclic_discriminated_arrays = false;
     let mut positional = Vec::new();
     let mut args = args.peekable();
 
@@ -251,6 +253,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Options, String> {
             "--keyed-map-collapse" => keyed_map_collapse = true,
             "--primitive-array-columns" => primitive_array_columns = true,
             "--object-array-columns" => object_array_columns = true,
+            "--cyclic-discriminated-arrays" => cyclic_discriminated_arrays = true,
             "--" => {
                 positional.extend(args);
                 break;
@@ -281,6 +284,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Options, String> {
         keyed_map_collapse,
         primitive_array_columns,
         object_array_columns,
+        cyclic_discriminated_arrays,
     })
 }
 
@@ -1985,6 +1989,7 @@ fn format_values(values: &[Value], options: &Options) -> Result<String, String> 
                             keyed_map_collapse: options.keyed_map_collapse,
                             primitive_array_columns: options.primitive_array_columns,
                             object_array_columns: options.object_array_columns,
+                            cyclic_discriminated_arrays: options.cyclic_discriminated_arrays,
                             delimiter: options.delimiter,
                             ..EncodeOptions::default()
                         })
