@@ -65,14 +65,14 @@ dependencies = [
 
 [[package]]
 name = "reddb-io-toon"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "reddb-io-tq"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "reddb-io-toon",
  "regex",
