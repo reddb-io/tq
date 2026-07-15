@@ -247,7 +247,6 @@ fn reports_filter_syntax_errors() {
 fn reports_argument_and_input_errors() {
     let usage = "usage: tq";
 
-    assert_error(&["-p", "yaml", "."], SAMPLE, "unsupported format `yaml`");
     assert_error(&["-o", "yaml", "."], SAMPLE, "unsupported format `yaml`");
     // A format flag with nothing after it.
     assert_error(&["-p"], SAMPLE, usage);
@@ -264,6 +263,21 @@ fn reports_argument_and_input_errors() {
     // Malformed input in either format.
     assert_error(&["-p", "json", "."], "{not json", "key must be a string");
     assert_error(&["."], "a: 1\n  b: 2\n", "invalid indentation");
+}
+
+#[test]
+fn yaml_input_defaults_to_toon_output() {
+    let output = run_tq(&["-p", "yaml", "."], "name: Ada\nactive: true\n");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "YAML input exits cleanly: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout is utf-8"),
+        "name: Ada\nactive: true\n"
+    );
 }
 
 #[test]

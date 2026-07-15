@@ -11,7 +11,7 @@ use reddb_io_toon::{
 };
 
 const USAGE: &str =
-    "usage: tq [-p toon|json|toonl] [-o toon|json|toonl] [-r] [-c] [-s|--slurp] [--delimiter comma|tab|pipe] [--nested-tabular-headers] [--keyed-map-collapse] [--primitive-array-columns] [--object-array-columns] <query> [file]";
+    "usage: tq [-p toon|json|toonl|yaml|yml] [-o toon|json|toonl] [-r] [-c] [-s|--slurp] [--delimiter comma|tab|pipe] [--nested-tabular-headers] [--keyed-map-collapse] [--primitive-array-columns] [--object-array-columns] <query> [file]";
 const TRIM_USAGE: &str = "usage: tq trim --keep-last N [--in-place] [FILE]";
 const CLOSE_USAGE: &str = "usage: tq close [--per-lane|--interleaved] [FILE]";
 const CHECK_USAGE: &str = "usage: tq check [-p toon|toonl] [FILE]";
@@ -21,6 +21,7 @@ enum Format {
     Json,
     Toon,
     Toonl,
+    Yaml,
 }
 
 #[derive(Debug)]
@@ -125,6 +126,10 @@ fn run() -> Result<(String, ExitCode), String> {
             let document = Value::from_json_str(&input).map_err(|error| error.to_string())?;
             evaluate(&document, &options.query)?
         }
+        Format::Yaml => {
+            let document = parse_yaml_value(&input)?;
+            evaluate(&document, &options.query)?
+        }
         Format::Toon => {
             let document = Value::parse_toon(&input).map_err(|error| error.to_string())?;
             evaluate(&document, &options.query)?
@@ -178,7 +183,7 @@ fn run_check(options: CheckOptions) -> Result<(String, ExitCode), String> {
     let report = match options.input_format {
         Format::Toon => detect_truncation_with_options(&input, ParseOptions::default()),
         Format::Toonl => detect_toonl_truncation(&input),
-        Format::Json => unreachable!("check rejects JSON input"),
+        Format::Json | Format::Yaml => unreachable!("check rejects non-TOON input"),
     };
     let output =
         serde_json::to_string_pretty(&report.to_json_value()).map_err(|error| error.to_string())?;
@@ -229,11 +234,11 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Options, String> {
         match arg.as_str() {
             "-p" => {
                 let format = args.next().ok_or_else(|| USAGE.to_owned())?;
-                input_format = Some(parse_format(&format)?);
+                input_format = Some(parse_input_format(&format)?);
             }
             "-o" => {
                 let format = args.next().ok_or_else(|| USAGE.to_owned())?;
-                output_format = Some(parse_format(&format)?);
+                output_format = Some(parse_output_format(&format)?);
             }
             "-r" => raw_output = true,
             "-c" => compact = true,
@@ -267,7 +272,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Options, String> {
         query,
         input_path,
         input_format,
-        output_format: output_format.unwrap_or(input_format),
+        output_format: output_format.unwrap_or_else(|| default_output_format(input_format)),
         raw_output,
         compact,
         slurp,
@@ -364,8 +369,8 @@ fn parse_check_args(args: impl Iterator<Item = String>) -> Result<CheckOptions, 
         match arg.as_str() {
             "-p" => {
                 let format = args.next().ok_or_else(|| CHECK_USAGE.to_owned())?;
-                let format = parse_format(&format)?;
-                if format == Format::Json {
+                let format = parse_input_format(&format)?;
+                if matches!(format, Format::Json | Format::Yaml) {
                     return Err(CHECK_USAGE.to_owned());
                 }
                 input_format = Some(format);
@@ -385,7 +390,7 @@ fn parse_check_args(args: impl Iterator<Item = String>) -> Result<CheckOptions, 
 
     let input_path = positional.pop();
     let input_format = input_format.unwrap_or_else(|| detect_input_format(input_path.as_deref()));
-    if input_format == Format::Json {
+    if matches!(input_format, Format::Json | Format::Yaml) {
         return Err(CHECK_USAGE.to_owned());
     }
     Ok(CheckOptions {
@@ -394,7 +399,14 @@ fn parse_check_args(args: impl Iterator<Item = String>) -> Result<CheckOptions, 
     })
 }
 
-fn parse_format(value: &str) -> Result<Format, String> {
+fn parse_input_format(value: &str) -> Result<Format, String> {
+    match value {
+        "yaml" | "yml" => Ok(Format::Yaml),
+        _ => parse_output_format(value),
+    }
+}
+
+fn parse_output_format(value: &str) -> Result<Format, String> {
     match value {
         "json" => Ok(Format::Json),
         "toon" => Ok(Format::Toon),
@@ -403,12 +415,26 @@ fn parse_format(value: &str) -> Result<Format, String> {
     }
 }
 
+fn default_output_format(input_format: Format) -> Format {
+    match input_format {
+        Format::Yaml => Format::Toon,
+        format => format,
+    }
+}
+
 fn detect_input_format(path: Option<&str>) -> Format {
     if path.is_some_and(|path| path.ends_with(".toonl")) {
         Format::Toonl
+    } else if path.is_some_and(|path| path.ends_with(".yaml") || path.ends_with(".yml")) {
+        Format::Yaml
     } else {
         Format::Toon
     }
+}
+
+fn parse_yaml_value(input: &str) -> Result<Value, String> {
+    let value = serde_norway::from_str(input).map_err(|error| error.to_string())?;
+    Ok(Value::from_json_value(value))
 }
 
 fn read_stdin() -> Result<String, String> {
@@ -1969,6 +1995,7 @@ fn format_values(values: &[Value], options: &Options) -> Result<String, String> 
                 }
             }
             Format::Toonl => unreachable!("TOONL output is handled before the loop"),
+            Format::Yaml => unreachable!("YAML output is not supported"),
         }
     }
     Ok(output)
