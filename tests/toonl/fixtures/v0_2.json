@@ -1,0 +1,82 @@
+{
+  "version": "toonl-v0.2",
+  "extension": ".toonl",
+  "mediaHint": "application/toonl",
+  "tests": [
+    {
+      "name": "decode/continuation-header-is-transparent",
+      "kind": "decode",
+      "input": "[]{id,name}:\n1,Ada\n[~]{id,name}:\n2,Linus\n[=2]\n",
+      "segments": [
+        {
+          "delimiter": ",",
+          "fields": ["id", "name"],
+          "rows": [
+            ["1", "Ada"],
+            ["2", "Linus"]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "decode/pipe-continuation-header-is-transparent",
+      "kind": "decode",
+      "input": "[|]{id|name}:\n1|Ada\n[~|]{id|name}:\n2|Linus\n[=2]\n",
+      "segments": [
+        {
+          "delimiter": "|",
+          "fields": ["id", "name"],
+          "rows": [
+            ["1", "Ada"],
+            ["2", "Linus"]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "close-transform/discards-continuation-header",
+      "kind": "close-transform",
+      "input": "[]{id,name}:\n1,Ada\n[~]{id,name}:\n2,Linus\n[=2]\n",
+      "expectedToonDocuments": [
+        "[2]{id,name}:\n  1,Ada\n  2,Linus\n"
+      ]
+    },
+    {
+      "name": "encode/continuation-every-two-rows",
+      "kind": "encode",
+      "delimiter": ",",
+      "fields": ["id", "name"],
+      "continuationEveryRows": 2,
+      "rows": [
+        ["1", "Ada"],
+        ["2", "Linus"],
+        ["3", "Grace"]
+      ],
+      "expected": "[]{id,name}:\n1,Ada\n2,Linus\n[~]{id,name}:\n3,Grace\n[=3]\n"
+    },
+    {
+      "name": "error/continuation-before-header",
+      "kind": "error",
+      "input": "[~]{id,name}:\n1,Ada\n",
+      "expectedError": "continuation header before header"
+    },
+    {
+      "name": "error/continuation-header-field-mismatch",
+      "kind": "error",
+      "input": "[]{id,name}:\n1,Ada\n[~]{id,role}:\n2,dev\n",
+      "expectedError": "continuation header mismatch"
+    },
+    {
+      "name": "error/continuation-header-delimiter-mismatch",
+      "kind": "error",
+      "input": "[]{id,name}:\n1,Ada\n[~|]{id|name}:\n2|Linus\n",
+      "expectedError": "continuation header mismatch"
+    },
+    {
+      "name": "v0.1-reject/continuation-header",
+      "kind": "v0.1-error",
+      "input": "[]{id,name}:\n1,Ada\n[~]{id,name}:\n2,Linus\n",
+      "expectedError": "invalid header delimiter"
+    }
+  ]
+}
