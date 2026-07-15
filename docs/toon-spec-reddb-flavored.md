@@ -1,5 +1,26 @@
 # TOON — reddb-io Flavored Specification
 
+**tl;dr:** This document specifies the reddb-io flavor of TOON—backward-compatible extensions for nested tabular headers, keyed-map collapse, and configurable delimiters layered on TOON v3.3. All decoders always accept extended forms (fail-closed against strict v3.3 readers); encoders emit them only when explicitly enabled, preserving canonical v3.3 as the default output. Credit: toon-format team.
+
+## Table of Contents
+
+1. [Acknowledgment](#acknowledgment)
+2. [Introduction](#introduction)
+3. [Baseline: the official TOON specification](#baseline-the-official-toon-specification)
+4. [The extension model](#the-extension-model)
+   - [Enabling emission, per surface](#enabling-emission-per-surface)
+5. [Extension 1 — Nested tabular headers](#extension-1--nested-tabular-headers)
+6. [Extension 2 — Keyed-map collapse](#extension-2--keyed-map-collapse)
+   - [The entry-count guardrail and its trade-off](#the-entry-count-guardrail-and-its-trade-off)
+7. [Delimiter choice](#delimiter-choice)
+8. [Depth guard](#depth-guard)
+9. [detectTruncation — structured completeness reports](#detecttruncation--structured-completeness-reports)
+10. [The wire-efficiency program](#the-wire-efficiency-program)
+    - [TOON vs JSON — a uniform table](#toon-vs-json--a-uniform-table)
+    - [TOONL vs JSONL — at stream scale](#toonl-vs-jsonl--at-stream-scale)
+11. [Relationship to the streaming layer](#relationship-to-the-streaming-layer)
+12. [Conformance](#conformance)
+
 ## Acknowledgment
 
 This document records the decisions and proposed evolutions that reddb-io layers
@@ -26,8 +47,8 @@ For an annotated, section-by-section companion to the official TOON v3.3 spec an
 how our implementations conform to it, see [`toon-spec.md`](toon-spec.md). For our
 streaming layer, see [`toonl.md`](toonl.md).
 
-The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
-RECOMMENDED, MAY, and OPTIONAL are to be interpreted as described in RFC 2119.
+The key words `MUST`, `MUST NOT`, `REQUIRED`, `SHALL`, `SHALL NOT`, `SHOULD`, `SHOULD NOT`,
+`RECOMMENDED`, `MAY`, and `OPTIONAL` are to be interpreted as described in RFC 2119.
 
 ## Baseline: the official TOON specification
 
@@ -51,15 +72,15 @@ unless explicitly enabled.
 Both wire extensions follow the same asymmetric rule. These four properties are
 the contract of the reddb-io flavor:
 
-- **Decoding is always on.** A decoder in this repository MUST accept the extended
+- **Decoding is always on.** A decoder in this repository `MUST` accept the extended
   forms without any flag.
-- **Encoding is opt-in.** An encoder MUST NOT emit an extended form unless the
+- **Encoding is opt-in.** An encoder `MUST NOT` emit an extended form unless the
   caller enabled it. With no options set, output is canonical v3.3.
 - **Fail-closed on strict v3 decoders.** Each extended form is a syntax error for
   a spec-only v3.3 decoder — a document using them is rejected, never silently
   decoded into a different shape.
-- **Lossless round-trip, unconditionally.** `decode(encode(x, opts)) == x` for
-  every JSON value `x` and every combination of extension options. Values that do
+- **Lossless round-trip, unconditionally.** For every JSON value *x* and every
+  combination of extension options: `decode(encode(x, opts)) == x`. Values that do
   not fit an extension's eligibility rule fall back to standard v3.3 forms.
 
 The asymmetry is deliberate: turning *decoding* on always costs nothing to a
@@ -68,6 +89,16 @@ that a naïve pipeline can never accidentally emit a document a strict v3.3 read
 would reject. Fail-closed rather than fail-open is the safety property that makes
 "decode always-on" tolerable: a strict v3.3 decoder confronted with an extended
 form errors loudly instead of quietly reading a different shape.
+
+**Example: a strict v3.3 decoder rejects this document containing nested headers:**
+
+```toon
+orders[2]{id,customer{name,country},total}:
+  1,Ada,UK,10.5
+  2,Bob,US,20
+```
+
+A reddb-io decoder accepts it; a spec-only v3.3 decoder throws a parse error instead of silently reading the wrong shape.
 
 ### Enabling emission, per surface
 
@@ -87,6 +118,8 @@ v3.3's tabular form (`key[N]{fields}:`) requires every column to be a primitive.
 This extension lets a column itself be a uniform nested object, declared
 recursively in the header as `field{sub1,sub2}`. Rows stay flat
 delimiter-separated lines; the header alone encodes the nested shape.
+
+**Rule set:** The grammar is recursive; rows count *leaf* columns; malformed headers (`MUST` be reported as parse errors); encoders emit only when all records have uniform shape recursively.
 
 ```toon
 orders[2]{id,customer{name,country},total}:
@@ -116,6 +149,57 @@ Rules:
   primitive). Any mismatch falls back to the standard expanded list form — never a
   hard error.
 
+**Example: three-level nested structure (order → billing address → coordinates):**
+
+```toon
+orders[2]{id,billing{street,address{lat,lng}},total}:
+  101,"Main St","42.3,-71.1",299.99
+  102,"Oak Ave","40.7,-74.0",150.50
+```
+
+```json
+{
+  "orders": [
+    {
+      "id": 101,
+      "billing": {
+        "street": "Main St",
+        "address": {"lat": "42.3", "lng": "-71.1"}
+      },
+      "total": 299.99
+    },
+    {
+      "id": 102,
+      "billing": {
+        "street": "Oak Ave",
+        "address": {"lat": "40.7", "lng": "-74.0"}
+      },
+      "total": 150.50
+    }
+  ]
+}
+```
+
+**Example: invalid — non-uniform leaf paths at same level:**
+
+```toon
+orders[2]{id,customer{name,country},shipto{zip}}:
+  1,Ada,UK,90210
+  2,Bob,US,10001
+```
+
+(Parse error: `customer` has 2 leaves, `shipto` has 1 leaf; encoder rejects at encode time, decoder rejects with line number in parse error.)
+
+**Example: tab-delimited with nested headers:**
+
+```toon
+orders[2]{id,customer{name,country},total}[	]:
+  1	Ada	UK	10.5
+  2	Bob	US	20
+```
+
+Cells containing tabs are quoted; nested structure is preserved via header alone.
+
 ## Extension 2 — Keyed-map collapse
 
 *Origin: upstream RFC [toon-format/spec#57](https://github.com/toon-format/spec/issues/57).*
@@ -123,7 +207,8 @@ Rules:
 Arrays of uniform objects get table-collapse in v3.3; keyed object *maps* with
 uniform values do not, so every field name repeats once per entry. This extension
 gives uniform maps the same treatment, reusing the recursive-brace header grammar
-— no new sigil family:
+— no new sigil family. A *map* in this context is a JSON object (keyed container),
+distinct from an array (indexed container).
 
 ```toon
 people{first,last}:
@@ -152,14 +237,83 @@ Rules:
 - Nested (recursive) leaves are eligible only when [nested tabular
   headers](#extension-1--nested-tabular-headers) is **also** enabled.
 
+**Example: keyed-map collapse with uniform values:**
+
+```toon
+people{first,last}:
+  joe: Joe,Schmoe
+  mary: Mary,Jane
+  alice: Alice,Jones
+```
+
+```json
+{
+  "people": {
+    "joe": {"first": "Joe", "last": "Schmoe"},
+    "mary": {"first": "Mary", "last": "Jane"},
+    "alice": {"first": "Alice", "last": "Jones"}
+  }
+}
+```
+
+**Example: invalid — single entry (below entry-count guardrail):**
+
+```toon
+people{first,last}:
+  joe: Joe,Schmoe
+```
+
+(Encoder with `keyedMapCollapse: true` emits the standard v3.3 object form instead of collapsed form, because only one entry exists. Decoder accepts both forms; round-trip is lossless.)
+
+```json
+{
+  "people": {
+    "joe": {"first": "Joe", "last": "Schmoe"}
+  }
+}
+```
+
+**Example: non-uniform map (falls back to v3.3):**
+
+```toon
+configs:
+  db: {host: localhost, port: 5432}
+  cache: {type: redis}
+```
+
+(Encoder emits standard v3.3 form because `db` and `cache` have different key sets. No collapsed header is emitted.)
+
+**Example: nested keyed-map collapse (with nested-tabular-headers enabled):**
+
+```toon
+teams{lead{name,email},size}:
+  backend: Alice,alice@example.com,8
+  frontend: Bob,bob@example.com,5
+```
+
+```json
+{
+  "teams": {
+    "backend": {
+      "lead": {"name": "Alice", "email": "alice@example.com"},
+      "size": 8
+    },
+    "frontend": {
+      "lead": {"name": "Bob", "email": "bob@example.com"},
+      "size": 5
+    }
+  }
+}
+```
+
 ### The entry-count guardrail and its trade-off
 
 Encoder eligibility is deterministic. An encoder with the option enabled emits the
-keyed-map collapse form only when **all** of the following hold:
+keyed-map collapse form only when **all** of the following conditions hold:
 
-1. the object has **at least two entries**;
+1. the object has **at least two entries** (entry count ≥ 2);
 2. every entry value is a non-empty object;
-3. every entry has the same key set as the first entry; and
+3. every entry has the same key set as the first entry (uniformity);
 4. each header leaf is primitive (or eligible per the nested-headers rule above).
 
 Rule 1 — the **entry-count guardrail** — is the notable trade-off. A single-entry
@@ -172,7 +326,7 @@ indirection, so the guardrail keeps output in the plain, self-evident object for
 until there is real repetition to amortize. The trade-off is that a producer
 emitting maps of size one never sees the collapsed form even with the option on;
 this is intentional and keeps the encoder's output stable and predictable rather
-than flipping shape at a size-one boundary. Round-trip is lossless either way,
+than flipping shape at a size-one boundary. **Round-trip is lossless in all cases,**
 because a non-collapsed map is just standard v3.3.
 
 ## Delimiter choice
@@ -199,6 +353,51 @@ is always locally legible. Delimiter selection never changes the decoded value;
 it is purely a wire-efficiency and readability lever, and the round-trip is
 lossless for every choice.
 
+**Example: comma-delimited (default, tokens-efficient for clean data):**
+
+```toon
+invoices[2]{id,customer,total,note}:
+  1001,Acme Corp,5000.00,Payment processed
+  1002,BigCo Ltd,12500.00,Pending approval
+```
+
+```json
+{
+  "invoices": [
+    {"id": 1001, "customer": "Acme Corp", "total": 5000.00, "note": "Payment processed"},
+    {"id": 1002, "customer": "BigCo Ltd", "total": 12500.00, "note": "Pending approval"}
+  ]
+}
+```
+
+**Example: tab-delimited (freetext with embedded commas, no quoting needed):**
+
+```toon
+invoices[2]{id,customer,total,note}[	]:
+  1001	Acme Corp	5000.00	Payment processed, invoice #2024
+  1002	BigCo Ltd	12500.00	Pending approval, awaiting signature
+```
+
+Under comma-delimiter, those notes would need per-cell quoting; under tab, they require no quoting overhead.
+
+**Example: pipe-delimited (human-readable tables):**
+
+```toon
+invoices[2]{id,customer,total,note}[|]:
+  1001|Acme Corp|5000.00|Payment processed
+  1002|BigCo Ltd|12500.00|Pending approval
+```
+
+**Example: nested headers with tab delimiter (each level declares locally):**
+
+```toon
+orders[2]{id,shipping{address,city},total}[	]:
+  101	"123 Main St"	Boston	299.99
+  102	"456 Oak Ave"	Seattle	150.50
+```
+
+The `shipping` header inherits no delimiter symbol (absence means comma for that header's nested context if you were to expand it), but the active delimiter at this level is tab.
+
 ## Depth guard
 
 Neither the official spec's data model nor its strict-mode checklist bounds
@@ -220,6 +419,41 @@ guard** as a robustness measure that does not change any decoded value.
 The guard is a defense-in-depth default, not a format change: a document within
 the limit decodes identically whether or not the guard is present, and the limit
 is configurable for callers whose inputs are known-shallow or known-trusted.
+
+**Example: valid nested structure (depth = 5):**
+
+```toon
+data: {
+  a: {
+    b: {
+      c: {
+        d: {
+          e: value
+        }
+      }
+    }
+  }
+}
+```
+
+Decodes successfully with default `max_depth: 1000`.
+
+**Example: rejecting untrusted input at encode:**
+
+Rust — prefer checked entry point:
+```rust
+let result = try_to_toon_with_options(&deeply_nested_json, EncodeOptions {
+  max_depth: 1000,
+  ..Default::default()
+});
+// Returns EncodeError if depth exceeds 1000, instead of stack overflow
+```
+
+JS — use the parse option:
+```javascript
+const parsed = parse(toonString, { maxDepth: 1000 });
+// Throws ParseError if nesting exceeds 1000, not a stack crash
+```
 
 ## detectTruncation — structured completeness reports
 
@@ -256,6 +490,72 @@ This is a diagnosis, not a decode: callers that need to know whether an
 LLM-produced document was cut off — before deciding to retry, extend, or reject —
 get a machine-readable answer with a line number and the declared-vs-actual
 counts, without catching a decode exception and re-deriving the cause.
+
+**Example: incomplete array (LLM truncation):**
+
+```toon
+orders[3]{id,customer,total}:
+  1001,Acme,5000
+  1002,BigCo,12500
+```
+
+Report (from all three surfaces):
+```json
+{
+  "complete": false,
+  "kind": "array_length_mismatch",
+  "line": 2,
+  "declared": 3,
+  "actual": 2,
+  "message": "declared 3 rows but received 2"
+}
+```
+
+**Example: field mismatch in tabular header:**
+
+```toon
+people[2]{name,email,phone}:
+  Alice,alice@example.com,555-1234
+  Bob,bob@example.com
+```
+
+Report:
+```json
+{
+  "complete": false,
+  "kind": "row_field_count_mismatch",
+  "line": 4,
+  "declared": 3,
+  "actual": 2,
+  "message": "expected 3 fields but got 2 at line 4"
+}
+```
+
+**Example: using detectTruncation in production:**
+
+Rust:
+```rust
+let report = detect_truncation_with_options(toon_string, Default::default());
+if !report.complete {
+  // Log structured diagnostic; decide to retry, extend, or reject
+  eprintln!("LLM output truncated: {}", report.message);
+  retry_generation();
+}
+```
+
+JS:
+```javascript
+const report = detectTruncation(toonString, { format: 'toon' });
+if (!report.complete) {
+  console.log(`Truncated at line ${report.line}: ${report.message}`);
+  await retryGeneration();
+}
+```
+
+CLI:
+```bash
+tq check -p toon output.toon && echo "Complete" || echo "Truncated"
+```
 
 ## The wire-efficiency program
 

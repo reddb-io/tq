@@ -1,5 +1,7 @@
 # TOON v3.3 — Annotated Specification & Implementation Companion
 
+**TL;DR:** TOON is a line-oriented, indentation-based format encoding the JSON data model with explicit lengths, deterministic quoting, and one active delimiter per array scope. This companion documents 100% conformance by the Rust (`reddb-io-toon`) and JavaScript (`@reddb-io/toon`) implementations against the official [toon-format/spec](https://github.com/toon-format/spec) v3.3 (author Johann Schopplich), including the design rationale, edge cases, and shared test corpora that keep both runtimes in sync. Credit to the original toon-format team for a specification written with RFC rigor and format restraint.
+
 ## Acknowledgment
 
 This document is an *annotated companion* to the official **TOON** specification
@@ -50,6 +52,40 @@ numbers) — those live in
 [`toon-spec-reddb-flavored.md`](toon-spec-reddb-flavored.md) — and it is not the
 streaming layer, which is [`toonl.md`](toonl.md).
 
+## Table of Contents
+
+- [Abstract & Status](#abstract--status-official-abstract-status)
+- [Terminology and Conventions](#1-terminology-and-conventions)
+- [Data Model](#2-data-model)
+- [Encoding Normalization](#3-encoding-normalization-reference-encoder)
+- [Decoding Interpretation](#4-decoding-interpretation-reference-decoder)
+- [Concrete Syntax and Root Form](#5-concrete-syntax-and-root-form)
+- [Header Syntax](#6-header-syntax-normative)
+- [Strings and Keys](#7-strings-and-keys)
+  - [Escaping](#71-escaping)
+  - [Quoting Rules for String Values](#72-quoting-rules-for-string-values)
+  - [Key Encoding](#73-key-encoding)
+  - [Decoding Rules for Strings and Keys](#74-decoding-rules-for-strings-and-keys)
+- [Objects](#8-objects)
+- [Arrays](#9-arrays)
+  - [Primitive Arrays (Inline)](#91-primitive-arrays-inline)
+  - [Arrays of Arrays (Primitives Only)](#92-arrays-of-arrays-primitives-only)
+  - [Arrays of Objects — Tabular Form](#93-arrays-of-objects--tabular-form)
+  - [Mixed / Non-Uniform Arrays — Expanded List](#94-mixed--non-uniform-arrays--expanded-list)
+- [Objects as List Items](#10-objects-as-list-items)
+- [Delimiters](#11-delimiters)
+- [Indentation and Whitespace](#12-indentation-and-whitespace)
+- [Conformance and Options](#13-conformance-and-options)
+  - [Key Folding and Path Expansion](#134-key-folding-and-path-expansion)
+- [Strict Mode Errors](#14-strict-mode-errors-authoritative-checklist)
+- [Security Considerations](#15-security-considerations)
+- [Internationalization](#16-internationalization)
+- [IANA Considerations](#17-iana-considerations)
+- [Versioning and Extensibility](#18-versioning-and-extensibility)
+- [Intellectual Property Considerations](#19-intellectual-property-considerations)
+- [Appendices A–F](#appendices-af-informative)
+- [Implementation Guarantees](#implementation-guarantees)
+
 ## Abstract & Status (official §Abstract, §Status)
 
 **What it defends.** TOON is a line-oriented, indentation-based text format that
@@ -63,6 +99,36 @@ upstream by advancing the pin deliberately, never by drifting a vendored copy.
 Because the status is "Working Draft", our conformance suite reads fixtures **live
 from the submodule**, so an upstream change surfaces as a test signal rather than
 silent divergence.
+
+**Examples:**
+
+Valid TOON document (root object):
+```toon
+name: Alice
+age: 30
+active: true
+```
+
+```json
+{"name": "Alice", "age": 30, "active": true}
+```
+
+Valid TOON document (root array):
+```toon
+[2]:Alice,30
+Bob,25
+```
+
+```json
+[["Alice", 30], ["Bob", 25]]
+```
+
+Invalid TOON (array lacks declared length):
+```toon
+[]:Alice,30
+```
+
+> Error: Empty array `[]` form disallows inline rows; use `key[N]` to declare a non-zero count.
 
 ## §1 Terminology and Conventions
 
@@ -90,6 +156,44 @@ strings but never as indentation.
 **Our implementation.** Both runtimes model the two delimiter roles explicitly and
 keep the folding-eligibility predicate separate from the unquoted-key predicate,
 so a dotted literal key is never accidentally expanded (see §13.4).
+
+**Examples:**
+
+Valid `IdentifierSegment` key (eligible for folding):
+```toon
+address_zip: 12345
+```
+
+```json
+{"address_zip": 12345}
+```
+
+Valid literal key (not an `IdentifierSegment`, not fold-eligible):
+```toon
+"user.full-name": Bob Smith
+```
+
+```json
+{"user.full-name": "Bob Smith"}
+```
+
+Valid quoted key in array header (keyed array):
+```toon
+"my-key"[2]{first,second}:
+Alice,30
+Bob,25
+```
+
+```json
+{"my-key": [{"first": "Alice", "second": 30}, {"first": "Bob", "second": 25}]}
+```
+
+Invalid: unquoted key with special characters:
+```toon
+user.full-name: Bob Smith
+```
+
+> Error: Keys containing dots (when not intended as path expansion) must be quoted.
 
 ## §2 Data Model
 
@@ -119,6 +223,39 @@ precision-sensitive decimals — asserting the same canonical TOON string and th
 same round-trip JSON from both. This is how we keep the crate's `i64`/`f64` domain
 and JavaScript's IEEE-754 `number` from disagreeing about a boundary value.
 
+**Examples:**
+
+Valid canonical number forms:
+```toon
+integer: 42
+decimal: 1.5
+zero: 0
+normalized_one: 1
+normalized_from_exponent: 1000000
+```
+
+```json
+{"integer": 42, "decimal": 1.5, "zero": 0, "normalized_one": 1, "normalized_from_exponent": 1000000}
+```
+
+Valid but non-canonical (accepted on decode, normalized on encode):
+```toon
+from_exponent: 1e6
+trailing_zeros: 1.5000
+negative_zero: -0
+```
+
+```json
+{"from_exponent": 1000000, "trailing_zeros": 1.5, "negative_zero": 0}
+```
+
+Invalid: leading zeros in integer part:
+```toon
+bad_leading_zero: 05
+```
+
+> Error: Leading zeros in integers are forbidden; `05` decodes as the string `"05"`, not the number `5`.
+
 ## §3 Encoding Normalization (Reference Encoder)
 
 **What it defends.** Non-JSON host values MUST be normalized to the JSON model
@@ -132,6 +269,31 @@ objects, unrecognized host values → null.
 the Rust crate normalizes from its `Value` model and from `serde` inputs. Both
 document their host-type mapping; `NaN`/`±Infinity → null` is enforced on the
 encode path.
+
+**Examples:**
+
+Valid JSON-model values (primitives, object, array):
+```toon
+string: hello
+number: 42
+boolean: true
+nullValue: null
+```
+
+```json
+{"string": "hello", "number": 42, "boolean": true, "nullValue": null}
+```
+
+Host-value normalization (NaN and Infinity become null):
+```toon
+# In JavaScript: encode({bad: NaN, inf: Infinity}) produces:
+special: null
+infinity: null
+```
+
+```json
+{"special": null, "infinity": null}
+```
 
 ## §4 Decoding Interpretation (Reference Decoder)
 
@@ -157,6 +319,48 @@ too — a decode "passes" only when the value equals the fixture's expected JSON
 *and* our own canonical output round-trips to it (see [Implementation
 guarantees](#implementation-guarantees)).
 
+**Examples:**
+
+Valid numeric tokens:
+```toon
+integer: 42
+decimal: 3.14
+exponent: 1E+03
+zero: 0
+```
+
+```json
+{"integer": 42, "decimal": 3.14, "exponent": 1000, "zero": 0}
+```
+
+Forbidden leading zeros (decode as strings):
+```toon
+leading_zero: 05
+prefix_zero: 0001
+```
+
+```json
+{"leading_zero": "05", "prefix_zero": "0001"}
+```
+
+Valid zero forms:
+```toon
+single_zero: 0
+zero_decimal: 0.5
+zero_exponent: 0e1
+```
+
+```json
+{"single_zero": 0, "zero_decimal": 0.5, "zero_exponent": 0}
+```
+
+Invalid: unterminated string:
+```toon
+bad: "unterminated
+```
+
+> Error: Unterminated quoted string.
+
 ## §5 Concrete Syntax and Root Form
 
 **What it defends.** The line/indentation model and, importantly, the **root-form
@@ -176,6 +380,63 @@ primitives — it is a malformed document).
 
 **Our implementation.** Both runtimes implement this exact precedence; the
 "two bare primitives at root" rejection is covered by the shared corpus.
+
+**Examples:**
+
+Valid root array (declared length, rows):
+```toon
+[2]:
+Alice,30
+Bob,25
+```
+
+```json
+[["Alice", 30], ["Bob", 25]]
+```
+
+Valid empty root array:
+```toon
+[]
+```
+
+```json
+[]
+```
+
+Valid single root primitive:
+```toon
+hello world
+```
+
+```json
+"hello world"
+```
+
+Valid root object:
+```toon
+name: Alice
+age: 30
+```
+
+```json
+{"name": "Alice", "age": 30}
+```
+
+Valid empty document (empty root object):
+```toon
+```
+
+```json
+{}
+```
+
+Invalid: two bare primitives at root:
+```toon
+hello
+world
+```
+
+> Error in strict mode: Multiple top-level primitives are ambiguous; this is neither an array (lacks header) nor an object (lacks colons). Malformed document.
 
 ## §6 Header Syntax (Normative)
 
@@ -201,6 +462,60 @@ key prefix (quoted literal or up-to-first-`[`), parse length, then the optional
 trailing delimiter symbol, then the optional `{…}` fields, then require the colon.
 Delimiter equality between bracket and fields is enforced, not merely parsed.
 
+**Examples:**
+
+Valid primitive array header (comma-delimited):
+```toon
+items[3]: apple,banana,cherry
+```
+
+```json
+{"items": ["apple", "banana", "cherry"]}
+```
+
+Valid tabular array header (field names, default comma delimiter):
+```toon
+people[2]{name,age}:
+Alice,30
+Bob,25
+```
+
+```json
+{"people": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]}
+```
+
+Valid tab-delimited array:
+```toon
+data[2]	:
+val1	val2
+val3	val4
+```
+
+```json
+{"data": [["val1", "val2"], ["val3", "val4"]]}
+```
+
+Invalid: leading zeros in length:
+```toon
+items[03]: apple,banana,cherry
+```
+
+> Error: Array length `03` has a forbidden leading zero; only `0` and lengths without leading zeros are valid.
+
+Invalid: content between bracket and colon:
+```toon
+items[3]extra: apple,banana,cherry
+```
+
+> Error in strict mode: Content `extra` found between bracket and colon; must be either nothing or field list `{…}` (delimiter mismatch).
+
+Invalid: delimiter mismatch (bracket vs fields):
+```toon
+people[2]|{name,age}:
+```
+
+> Error: Bracket declares `|` delimiter but field list uses `,`; delimiters must match.
+
 ## §7 Strings and Keys
 
 ### §7.1 Escaping
@@ -220,6 +535,35 @@ case-insensitive on decode, lowercase SHOULD on encode.
 rejections; the "reject invalid escape / unterminated string" cases are in the
 shared corpus (e.g. `name: "bad\xescape"` from Appendix A error cases).
 
+**Examples:**
+
+Valid escape sequences:
+```toon
+backslash: "path\\to\\file"
+quote: "He said \"hello\""
+newline: "line1\nline2"
+tab: "col1\tcol2"
+unicode: "emoji A"
+```
+
+```json
+{"backslash": "path\\to\\file", "quote": "He said \"hello\"", "newline": "line1\nline2", "tab": "col1\tcol2", "unicode": "emoji A"}
+```
+
+Invalid: unknown escape sequence:
+```toon
+bad: "unknown\xescape"
+```
+
+> Error: `\x` is not a valid escape; only `\\`, `\"`, `\n`, `\r`, `\t`, and `\uXXXX` are permitted.
+
+Invalid: lone surrogate in `\uXXXX`:
+```toon
+bad_surrogate: "\uD800"
+```
+
+> Error: Lone surrogate `U+D800` is not valid; surrogates must be paired or replaced with the actual UTF-8 character.
+
 ### §7.2 Quoting Rules for String Values
 
 **The quote-or-not decision tree.** A string MUST be quoted if any hold: empty;
@@ -238,6 +582,43 @@ string.
 (active vs document) before applying the predicate — the single most important
 detail for byte-identical output between the two runtimes.
 
+**Examples:**
+
+Valid unquoted strings (safe in document context):
+```toon
+name: Alice
+city: New York
+price: $9.99
+```
+
+```json
+{"name": "Alice", "city": "New York", "price": "$9.99"}
+```
+
+Strings that must be quoted (keyword, numeric-like, leading dash):
+```toon
+flag: true
+numeric: "123"
+negative: "-5"
+empty: ""
+url: "http://example.com"
+```
+
+```json
+{"flag": true, "numeric": "123", "negative": "-5", "empty": "", "url": "http://example.com"}
+```
+
+Context-dependent quoting (comma-delimited array):
+```toon
+items[3]: apple, "banana,split", cherry
+```
+
+```json
+{"items": ["apple", "banana,split", "cherry"]}
+```
+
+> Note: `"banana,split"` must be quoted in the array because comma is the active delimiter. In object context (document delimiter), it might not be quoted if the delimiter were different.
+
 ### §7.3 Key Encoding
 
 **What it defends.** Keys and field names MAY be unquoted only if they match
@@ -248,10 +629,70 @@ quoting MUST be quoted in *all* contexts, including array headers (`"my-key"[N]:
 names, and header key prefixes; the `"my-key"[3]:` and `"x-items"[2]{…}:` cases
 from Appendix A are in the corpus.
 
+**Examples:**
+
+Valid unquoted keys (IdentifierSegment only):
+```toon
+user_id: 123
+firstName: Alice
+```
+
+```json
+{"user_id": 123, "firstName": "Alice"}
+```
+
+Valid quoted keys (special characters):
+```toon
+"user-id": 123
+"first.name": Alice
+"content type": "application/json"
+```
+
+```json
+{"user-id": 123, "first.name": "Alice", "content type": "application/json"}
+```
+
+Quoted key in array header:
+```toon
+"my-key"[2]{name,age}:
+Alice,30
+Bob,25
+```
+
+```json
+{"my-key": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]}
+```
+
+Invalid: unquoted key with hyphen:
+```toon
+user-id: 123
+```
+
+> Error: Key `user-id` contains `-`, which requires quoting; write `"user-id": 123`.
+
 ### §7.4 Decoding Rules for Strings and Keys
 
 Quoted keys MUST be unescaped per §7.1; a key MUST be followed by `:` or the
 decoder MUST error. Handled identically in both runtimes.
+
+**Examples:**
+
+Valid key-value pairs (key followed by colon):
+```toon
+"escaped key": value
+simple: 42
+```
+
+```json
+{"escaped key": "value", "simple": 42}
+```
+
+Invalid: missing colon after key:
+```toon
+name Alice
+```
+
+> Error: Key `name` must be followed by `:`, not by the value directly.
 
 ## §8 Objects
 
@@ -271,6 +712,54 @@ changes shape.
 **Our implementation.** Both runtimes decode bare `key:` to an object and require
 `key: []` for the empty array, matching the spec exactly.
 
+**Examples:**
+
+Valid nested object (bare `key:`):
+```toon
+address:
+  street: 123 Main St
+  city: Anytown
+```
+
+```json
+{"address": {"street": "123 Main St", "city": "Anytown"}}
+```
+
+Valid empty nested object:
+```toon
+metadata:
+```
+
+```json
+{"metadata": {}}
+```
+
+Valid empty array (explicit `[]` form):
+```toon
+tags: []
+```
+
+```json
+{"tags": []}
+```
+
+Dotted key (literal, not expanded unless opt-in):
+```toon
+"user.profile.name": Alice
+```
+
+```json
+{"user.profile.name": "Alice"}
+```
+
+Invalid: bare `key:` without nested content at same or deeper level creates empty object:
+```toon
+address:
+name: Alice
+```
+
+> Note: `address` is an empty object `{}`; `name` is a sibling key because it is at the same depth. The structure is `{"address": {}, "name": "Alice"}`.
+
 ## §9 Arrays
 
 ### §9.1 Primitive Arrays (Inline)
@@ -280,11 +769,98 @@ whitespace-surrounded) decode to the empty string; strict mode requires the
 decoded count to equal `N`. Empty arrays: `key: []` / `[]` preferred, legacy
 `key[0]:` / `[0]:` accepted.
 
+**Examples:**
+
+Valid primitive array (comma-delimited):
+```toon
+colors[3]: red, green, blue
+```
+
+```json
+{"colors": ["red", "green", "blue"]}
+```
+
+Valid array with empty string:
+```toon
+items[3]: apple, , cherry
+```
+
+```json
+{"items": ["apple", "", "cherry"]}
+```
+
+Valid empty array (preferred form):
+```toon
+tags: []
+```
+
+```json
+{"tags": []}
+```
+
+Valid empty array (legacy form):
+```toon
+tags[0]:
+```
+
+```json
+{"tags": []}
+```
+
+Invalid: inline count mismatch (in strict mode):
+```toon
+colors[3]: red, green
+```
+
+> Error in strict mode: Array `colors` declared length `3` but has only `2` elements (actual row count does not match declared `N`).
+
 ### §9.2 Arrays of Arrays (Primitives Only)
 
 Parent header `key[N]:` then `- [M]: …` list items at depth +1; inner arrays split
 on their own active delimiter; strict mode enforces both `M` and outer `N`. The
 `key: []` field-form does **not** apply to list-item inner arrays.
+
+**Examples:**
+
+Valid array of arrays (two inner arrays of 2 elements each):
+```toon
+matrix[2]:
+- [2]: 1,2
+- [2]: 3,4
+```
+
+```json
+{"matrix": [[1, 2], [3, 4]]}
+```
+
+Valid with tab-delimited inner arrays:
+```toon
+data[2]:
+- [2]	: a	b
+- [2]	: c	d
+```
+
+```json
+{"data": [["a", "b"], ["c", "d"]]}
+```
+
+Invalid: outer count mismatch (in strict mode):
+```toon
+matrix[3]:
+- [2]: 1,2
+- [2]: 3,4
+```
+
+> Error in strict mode: Array `matrix` declared `3` list items but found only `2`.
+
+Invalid: inner count mismatch:
+```toon
+matrix[2]:
+- [2]: 1,2
+- [3]: 3,4,5
+```
+
+> Note: In strict mode, each `[M]` is checked; if the outer count alone is satisfied, the inner count mismatch on the second item would fail in strict mode.
 
 ### §9.3 Arrays of Objects — Tabular Form
 
@@ -308,6 +884,59 @@ list-item object interact with §10 indentation.
 **Our implementation.** Both runtimes implement the first-unquoted-position
 comparison verbatim; the quoted-colon and mixed cases are pinned by the corpus.
 
+**Examples:**
+
+Valid tabular array (field names, comma-delimited):
+```toon
+people[2]{name,age}:
+Alice,30
+Bob,25
+```
+
+```json
+{"people": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]}
+```
+
+Valid with quoted value containing the active delimiter:
+```toon
+urls[2]{title,link}:
+Home,"http://example.com"
+Docs,"http://example.com/docs"
+```
+
+```json
+{"urls": [{"title": "Home", "link": "http://example.com"}, {"title": "Docs", "link": "http://example.com/docs"}]}
+```
+
+Valid with quoted colon inside a cell (does not end the row):
+```toon
+entries[1]{description,url}:
+"Time: 12:34:56","http://a:b"
+```
+
+```json
+{"entries": [{"description": "Time: 12:34:56", "url": "http://a:b"}]}
+```
+
+Invalid: row width mismatch (in strict mode):
+```toon
+people[2]{name,age}:
+Alice,30
+Bob
+```
+
+> Error in strict mode: Row `2` has `1` field(s) but header declares `2` field(s).
+
+Invalid: row count mismatch:
+```toon
+people[2]{name,age}:
+Alice,30
+Bob,25
+Charlie,35
+```
+
+> Error in strict mode: Tabular array `people` declared `2` rows but found `3`.
+
 ### §9.4 Mixed / Non-Uniform Arrays — Expanded List
 
 When tabular requirements fail: `key[N]:` then one list item per element —
@@ -315,6 +944,42 @@ When tabular requirements fail: `key[N]:` then one list item per element —
 arrays-of-objects/non-uniform (tabular form is unavailable in this nested
 position; expanded list MUST be used), objects per §10. Strict mode enforces list
 count = `N`.
+
+**Examples:**
+
+Valid mixed array (primitive, nested array, object):
+```toon
+items[3]:
+- hello
+- [2]: 1, 2
+- key: value
+```
+
+```json
+{"items": ["hello", [1, 2], {"key": "value"}]}
+```
+
+Valid non-uniform array of objects (different keys per object):
+```toon
+records[2]:
+- name: Alice
+  age: 30
+- name: Bob
+  country: USA
+```
+
+```json
+{"records": [{"name": "Alice", "age": 30}, {"name": "Bob", "country": "USA"}]}
+```
+
+Invalid: count mismatch (in strict mode):
+```toon
+items[3]:
+- hello
+- world
+```
+
+> Error in strict mode: Array `items` declared `3` list items but found `2`.
 
 ## §10 Objects as List Items
 
@@ -335,6 +1000,58 @@ depth +1 line after rows terminates them.
 and its decode mirror; Appendix A's "nested tabular inside a list item" example is
 in the corpus.
 
+**Examples:**
+
+Valid object as list item (first field on hyphen line):
+```toon
+items[2]:
+- name: Alice
+  age: 30
+- name: Bob
+  age: 25
+```
+
+```json
+{"items": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]}
+```
+
+Valid: tabular field as first field (rows at depth +2, siblings at depth +1):
+```toon
+collection[2]:
+- tags[2]{tag,count}:
+  important,5
+  urgent,3
+  owner: Alice
+- tags[1]{tag,count}:
+  done,2
+  owner: Bob
+```
+
+```json
+{"collection": [{"tags": [{"tag": "important", "count": 5}, {"tag": "urgent", "count": 3}], "owner": "Alice"}, {"tags": [{"tag": "done", "count": 2}], "owner": "Bob"}]}
+```
+
+Valid: empty object as list item (bare hyphen):
+```toon
+items[1]:
+-
+```
+
+```json
+{"items": [{}]}
+```
+
+Invalid: improper indentation (rows at depth +1 instead of +2):
+```toon
+collection[2]:
+- tags[2]{tag,count}:
+  important,5
+  urgent,3
+owner: Alice
+```
+
+> Error: Row `1` is at depth +1, but tabular rows must be at depth +2 relative to the hyphen. The `owner: Alice` field should be at depth +1 (sibling to the `tags` header), but improperly indented rows confuse the structure.
+
 ## §11 Delimiters
 
 **What it defends.** The three delimiters and, in §11.1/§11.2, the encode/decode
@@ -350,6 +1067,44 @@ runtimes' quoting and splitting paths — see §7.2. This is the reddb *flavor's
 lever for tab/pipe delimiter choice, documented in
 [`toon-spec-reddb-flavored.md`](toon-spec-reddb-flavored.md#delimiter-choice);
 the base behavior here is pure v3.3.
+
+**Examples:**
+
+Valid comma-delimited array (document delimiter is also comma, but object fields quote against document):
+```toon
+numbers[3]: 1, 2, 3
+description: "item, with comma"
+```
+
+```json
+{"numbers": [1, 2, 3], "description": "item, with comma"}
+```
+
+Valid tab-delimited array:
+```toon
+data[2]	:
+a	b
+c	d
+note: "separate	by	tabs"
+```
+
+```json
+{"data": [["a", "b"], ["c", "d"]], "note": "separate\tby\ttabs"}
+```
+
+Valid pipe-delimited array:
+```toon
+items[2]|:
+apple|red
+banana|yellow
+note: "pipe | character"
+```
+
+```json
+{"items": [["apple", "red"], ["banana", "yellow"]], "note": "pipe | character"}
+```
+
+> Note: In object context (document delimiter), the same value may not need quoting if the delimiter choice is different.
 
 ## §12 Indentation and Whitespace
 
@@ -370,6 +1125,42 @@ newline and no trailing spaces; strict decode enforces the indentation-multiple
 and no-tab-indent rules. The whitespace invariants are part of what the encode
 corpus checks byte-for-byte.
 
+**Examples:**
+
+Valid canonical indentation (2 spaces per level, no trailing spaces or newlines):
+```toon
+user:
+  name: Alice
+  address:
+    street: 123 Main
+    city: Anytown
+```
+
+```json
+{"user": {"name": "Alice", "address": {"street": "123 Main", "city": "Anytown"}}}
+```
+
+Valid with custom indent size (4 spaces per level):
+```toon
+user:
+    name: Alice
+    address:
+        street: 123 Main
+```
+
+```json
+{"user": {"name": "Alice", "address": {"street": "123 Main"}}}
+```
+
+Invalid: non-multiple indentation (in strict mode):
+```toon
+user:
+  name: Alice
+   age: 30
+```
+
+> Error in strict mode: Line `3` has `3` spaces of indentation, which is not a multiple of `indentSize: 2`. Indentation must be exact multiples.
+
 ## §13 Conformance and Options
 
 **What it defends.** Per-class checklists (§13.1 encoder, §13.2 decoder, §13.3
@@ -385,6 +1176,32 @@ the pinned corpus. `strict` defaults to true; the decoder options
 Rust). Note our **depth guard** (`max_depth`, default 1000) is an *additional*
 robustness option beyond the spec's set — it changes no decoded value and is
 documented in the flavored spec.
+
+**Examples:**
+
+Valid with strict mode enabled (default, detects truncation):
+```toon
+items[3]: apple, banana, cherry
+```
+
+```json
+{"items": ["apple", "banana", "cherry"]}
+```
+
+Non-strict mode (allows count mismatches, silently):
+```toon
+items[5]: apple, banana
+```
+
+> In non-strict mode: `{"items": ["apple", "banana"]}` (silently accepts fewer elements than declared).
+
+Custom `indentSize` option (4 spaces per level):
+```toon
+nested:
+    field: value
+```
+
+> Parsed with `ParseOptions { indentSize: 4, … }`
 
 ### §13.4 Key Folding and Path Expansion
 
@@ -417,6 +1234,51 @@ predicate, §1) and implement the strict-conflict/LWW branch per §14.3. Both de
 `keyFolding`/`expandPaths` to `"off"`, so round-trip is literal unless the caller
 opts in.
 
+**Examples:**
+
+Literal (no folding, default):
+```toon
+user:
+  profile:
+    name: Alice
+```
+
+```json
+{"user": {"profile": {"name": "Alice"}}}
+```
+
+With key folding enabled (encodes as dotted path):
+```toon
+user.profile.name: Alice
+```
+
+> Input (unfolded JSON): `{"user": {"profile": {"name": "Alice"}}}`
+> Encoded with `keyFolding: "safe"`: `user.profile.name: Alice`
+
+Path expansion (decoding dotted keys):
+```toon
+user.profile.name: Alice
+```
+
+> Parsed with `expandPaths: true`: `{"user": {"profile": {"name": "Alice"}}}`
+> Parsed with `expandPaths: false` (default): `{"user.profile.name": "Alice"}`
+
+Foldable chain requires all `IdentifierSegment`s:
+```toon
+"my-obj":
+  "nested-key": value
+```
+
+> Not foldable (segments contain hyphens); remains literal nested structure.
+
+Path expansion conflict (strict mode, default):
+```toon
+a.b: 1
+a: 2
+```
+
+> Error in strict mode: Conflict between `a.b` (suggests `a` is an object) and `a` (a primitive). With `expandPaths: true, strict: false`, last-write-wins: `{a: 2}`.
+
 ## §14 Strict Mode Errors (Authoritative Checklist)
 
 **What it defends.** The authoritative list of strict-mode rejections, grouped:
@@ -442,6 +1304,52 @@ diagnosis (declared-vs-actual with a line number) callers can act on. The API an
 its rationale are documented in
 [`toon-spec-reddb-flavored.md`](toon-spec-reddb-flavored.md#detecttruncation--structured-completeness-reports).
 
+**Examples:**
+
+Valid: count and width correct (passes strict):
+```toon
+people[2]{name,age}:
+Alice,30
+Bob,25
+```
+
+```json
+{"people": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]}
+```
+
+Invalid: count mismatch (strict mode error):
+```toon
+people[3]{name,age}:
+Alice,30
+Bob,25
+```
+
+> Error (structured report): `kind: "array-count-mismatch"`, `declared: 3`, `actual: 2`, `line: 1`
+
+Invalid: width mismatch (strict mode error):
+```toon
+people[2]{name,age}:
+Alice,30
+Bob
+```
+
+> Error (structured report): `kind: "array-width-mismatch"`, `declared: 2`, `actual: 1`, `line: 3`
+
+Invalid: duplicate key (strict mode error):
+```toon
+name: Alice
+name: Bob
+```
+
+> Error in strict mode: Duplicate key `name` at same level; last-write-wins in non-strict mode.
+
+Invalid: malformed bracket length:
+```toon
+items[abc]: value
+```
+
+> Error: Bracket contains non-numeric `abc`; array length must be a non-negative integer.
+
 ## §15 Security Considerations
 
 **What it defends.** Quoting (§7.2) mitigates injection/ambiguity; strict checks
@@ -460,12 +1368,80 @@ input, with checked encode entry points for untrusted values. It changes no
 decoded value — a within-limit document decodes identically. See the flavored
 spec's [Depth guard](toon-spec-reddb-flavored.md#depth-guard).
 
+**Examples:**
+
+Valid injection defense via quoting:
+```toon
+code: "alert(\"injected\")"
+command: "rm -rf /"
+```
+
+```json
+{"code": "alert(\"injected\")", "command": "rm -rf /"}
+```
+
+> The `"` characters inside quoted strings are escaped and do not break out of the string context.
+
+Self-checking truncation detection:
+```toon
+data[10]{id,value}:
+1,100
+2,200
+```
+
+> Error in strict mode: Declared `10` rows but found only `2`; truncation is detected and reported with line/count mismatch.
+
+Depth guard (over-deep document rejected with default `max_depth: 1000`):
+```toon
+a:
+  b:
+    c:
+      ...
+      (1000+ levels)
+```
+
+> Error: Maximum nesting depth (1000) exceeded; use `max_depth: 0` to disable for trusted input.
+
 ## §16 Internationalization
 
 Full Unicode in keys and values (subject to quoting/escaping); no locale-dependent
 number/boolean formatting (no thousands separators). Both runtimes emit
 locale-independent canonical numbers (§2) and pass the Unicode/emoji examples from
 Appendix A.
+
+**Examples:**
+
+Valid Unicode and emoji in unquoted context:
+```toon
+emoji: 😀🎉
+greeting: Привет мир
+```
+
+```json
+{"emoji": "😀🎉", "greeting": "Привет мир"}
+```
+
+Valid Unicode keys:
+```toon
+"日本語": こんにちは
+"Ελληνικά": Γεια σας
+```
+
+```json
+{"日本語": "こんにちは", "Ελληνικά": "Γεια σας"}
+```
+
+Canonical number formatting (no locale-dependent separators):
+```toon
+price_usd: 1000.50
+quantity: 1000000
+```
+
+```json
+{"price_usd": 1000.50, "quantity": 1000000}
+```
+
+> Numbers are always rendered in C locale (`.` for decimal separator, no thousands separators), regardless of system locale.
 
 ## §17 IANA Considerations
 
@@ -485,6 +1461,21 @@ they add no new sigil family, reuse the recursive-brace header grammar, and
 fail-closed against strict v3.3 — so they are backward-compatible evolutions
 rather than a fork. Details in
 [`toon-spec-reddb-flavored.md`](toon-spec-reddb-flavored.md).
+
+**Examples:**
+
+Valid v3.3 (unchanged by future extensions):
+```toon
+items[2]{name,value}:
+apple,1
+banana,2
+```
+
+```json
+{"items": [{"name": "apple", "value": 1}, {"name": "banana", "value": 2}]}
+```
+
+> Reserved characters (`:`, `[`, `]`, `{`, `}`, `-`) retain their meaning; path separator `.` is fixed for backwards compatibility.
 
 ## §19 Intellectual Property Considerations
 
