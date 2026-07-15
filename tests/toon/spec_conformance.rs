@@ -104,6 +104,11 @@ fn official_toon_spec_fixtures_do_not_regress() {
                         .and_then(|options| options.get("keyedMapCollapse"))
                         .and_then(Json::as_bool)
                         .unwrap_or(false)
+                        || test
+                            .get("options")
+                            .and_then(|options| options.get("primitiveArrayColumns"))
+                            .and_then(Json::as_bool)
+                            .unwrap_or(false)
                     {
                         let input = test.get("input").expect("keyed map encode input");
                         let expected = test
@@ -357,6 +362,10 @@ fn encoder_options(options: Option<&Json>) -> reddb_io_toon::EncodeOptions {
             .unwrap_or(false),
         keyed_map_collapse: options
             .get("keyedMapCollapse")
+            .and_then(Json::as_bool)
+            .unwrap_or(false),
+        primitive_array_columns: options
+            .get("primitiveArrayColumns")
             .and_then(Json::as_bool)
             .unwrap_or(false),
         delimiter: options
