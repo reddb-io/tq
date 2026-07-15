@@ -359,6 +359,11 @@ fn encoder_options(options: Option<&Json>) -> reddb_io_toon::EncodeOptions {
             .get("keyedMapCollapse")
             .and_then(Json::as_bool)
             .unwrap_or(false),
+        delimiter: options
+            .get("delimiter")
+            .and_then(Json::as_str)
+            .and_then(|delimiter| delimiter.chars().next())
+            .unwrap_or(','),
         ..reddb_io_toon::EncodeOptions::default()
     }
 }
