@@ -177,6 +177,43 @@ fn toonl_reader_and_writer_stream_rows_with_schema_rotation() {
 }
 
 #[test]
+fn toonl_reader_streams_tagged_rows_in_wire_order() {
+    let input = b"[]{event}:\n[]<req>{method,path,status}:\nstarted\nreq:GET,/health,200\nfinished\nreq:POST,/login,401\n";
+    let rows = ToonlReader::new(lines(input))
+        .collect::<Result<Vec<_>, _>>()
+        .expect("valid tagged TOONL rows");
+
+    assert_eq!(
+        rows.iter()
+            .map(Value::to_json_value)
+            .collect::<Vec<serde_json::Value>>(),
+        vec![
+            json!({"event": "started"}),
+            json!({"method": "GET", "path": "/health", "status": 200}),
+            json!({"event": "finished"}),
+            json!({"method": "POST", "path": "/login", "status": 401}),
+        ]
+    );
+}
+
+#[test]
+fn toonl_reader_rejects_unknown_and_overflow_tagged_lanes() {
+    let unknown = ToonlReader::new(lines(b"[]<req>{method,path}:\nmetric:cpu,0.42\n"))
+        .collect::<Result<Vec<_>, _>>()
+        .expect_err("unknown tag is rejected")
+        .to_string();
+    assert!(unknown.contains("unknown tag"));
+
+    let overflow =
+        b"[]<a>{v}:\n[]<b>{v}:\n[]<c>{v}:\n[]<d>{v}:\n[]<e>{v}:\n[]<f>{v}:\n[]<g>{v}:\n[]<h>{v}:\n[]<i>{v}:\n";
+    let error = ToonlReader::new(lines(overflow))
+        .collect::<Result<Vec<_>, _>>()
+        .expect_err("9th live tagged lane is rejected")
+        .to_string();
+    assert!(error.contains("too many tagged lanes"));
+}
+
+#[test]
 fn toonl_streaming_reader_accepts_matching_continuation_headers() {
     let input = b"[]{id,name}:\n1,Ada\n[~]{id,name}:\n2,Linus\n[=2]\n";
     let rows = ToonlReader::new(lines(input))

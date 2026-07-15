@@ -21,6 +21,8 @@ import {
 
 const DELIMITERS = [DOCUMENT_DELIMITER, '|', '\t']
 const CURSOR_ANCHOR_LIMIT = 64
+const TAGGED_LANE_LIMIT = 8
+const TAG_PATTERN = /^[A-Za-z0-9_-]+$/
 const TEXT_ENCODER = new TextEncoder()
 const TEXT_DECODER = new TextDecoder()
 
@@ -47,7 +49,28 @@ function trailerCount(line, lineNumber) {
   return Number.parseInt(digits, 10)
 }
 
-/** `[<delim?>]{fields}:` → `{delimiter, fields}`; `null` when not a header. */
+function validateTag(tag, lineNumber) {
+  if (!TAG_PATTERN.test(tag)) {
+    throw toonlError(lineNumber, 'invalid tag')
+  }
+}
+
+function taggedRowPrefix(line, lineNumber) {
+  const colon = line.indexOf(':')
+  if (colon <= 0) {
+    return null
+  }
+  const tag = line.slice(0, colon)
+  if (!TAG_PATTERN.test(tag)) {
+    if (/^[A-Za-z0-9_-]/.test(tag) && /^[^,[\]|{}:\t ]+$/.test(tag)) {
+      throw toonlError(lineNumber, 'invalid tag')
+    }
+    return null
+  }
+  return { tag, cellsText: line.slice(colon + 1) }
+}
+
+/** `[<delim?>]{fields}:` or `[]<tag>{fields}:` → header; `null` when not a header. */
 function parseHeaderLine(line, lineNumber) {
   if (!line.startsWith('[')) {
     return null
@@ -69,7 +92,20 @@ function parseHeaderLine(line, lineNumber) {
   }
   const delimiter = delimiterText === '' ? DOCUMENT_DELIMITER : delimiterText
 
-  const suffix = rest.slice(close + 1)
+  let suffix = rest.slice(close + 1)
+  let tag = null
+  if (!continuation && suffix.startsWith('<')) {
+    const tagEnd = suffix.indexOf('>')
+    if (tagEnd === -1) {
+      throw toonlError(lineNumber, 'invalid tag')
+    }
+    tag = suffix.slice(1, tagEnd)
+    validateTag(tag, lineNumber)
+    if (delimiterText !== '') {
+      throw toonlError(lineNumber, 'invalid header delimiter')
+    }
+    suffix = suffix.slice(tagEnd + 1)
+  }
   if (!suffix.startsWith('{') || !suffix.endsWith('}:')) {
     throw toonlError(lineNumber, 'invalid header')
   }
@@ -85,11 +121,11 @@ function parseHeaderLine(line, lineNumber) {
     throw toonlError(lineNumber, 'invalid header fields')
   }
 
-  return { delimiter, fields, fieldText, continuation }
+  return { delimiter, fields, fieldText, continuation, tag }
 }
 
 function assertContinuation(open, header, lineNumber) {
-  if (open === null) {
+  if (open === null || open.delimiter === undefined) {
     throw toonlError(lineNumber, 'continuation header before header')
   }
   if (open.delimiter !== header.delimiter || open.fieldText !== header.fieldText) {
@@ -142,7 +178,7 @@ function classifyLine(line, lineNumber, open) {
 
   const count = trailerCount(line, lineNumber)
   if (count !== null) {
-    if (open === null) {
+    if (open === null || open.delimiter === undefined) {
       throw toonlError(lineNumber, 'trailer without header')
     }
     if (open.rowCount !== count) {
@@ -157,10 +193,26 @@ function classifyLine(line, lineNumber, open) {
       assertContinuation(open, header, lineNumber)
       return { kind: 'continuation' }
     }
+    if (header.tag !== null) {
+      return { kind: 'tag-header', header }
+    }
     return { kind: 'header', header }
   }
 
-  if (open === null) {
+  const tagged = taggedRowPrefix(line, lineNumber)
+  if (tagged !== null) {
+    const lane = open?.taggedLanes?.get(tagged.tag)
+    if (lane === undefined) {
+      throw toonlError(lineNumber, 'unknown tag')
+    }
+    return {
+      kind: 'tagged-row',
+      tag: tagged.tag,
+      cells: parseRow(tagged.cellsText, lane.delimiter, lane.fields.length, lineNumber),
+    }
+  }
+
+  if (open === null || open.delimiter === undefined) {
     throw toonlError(lineNumber, 'row before header')
   }
   return {
@@ -179,8 +231,46 @@ function classifyLine(line, lineNumber, open) {
  * unterminated tail is the normal shape of a stream someone is still writing.
  */
 function parseStreamInternal(input) {
-  const segments = []
-  let current = null
+  const laneOrder = []
+  const lanes = new Map()
+  const anonymousSegments = []
+  let anonymous = null
+  let sawTaggedSyntax = false
+
+  function pushAnonymousSegment() {
+    if (anonymous === null) {
+      return
+    }
+    anonymousSegments.push({
+      delimiter: anonymous.delimiter,
+      fields: anonymous.fields,
+      fieldText: anonymous.fieldText,
+      rows: anonymous.rows,
+    })
+  }
+
+  function ensureLane(tag, header, lineNumber) {
+    let lane = lanes.get(tag)
+    if (lane === undefined) {
+      if (lanes.size >= TAGGED_LANE_LIMIT) {
+        throw toonlError(lineNumber, 'too many tagged lanes')
+      }
+      lane = { segments: [], current: null }
+      lanes.set(tag, lane)
+      laneOrder.push(tag)
+    } else if (lane.current !== null) {
+      lane.segments.push(lane.current)
+    }
+    lane.current = {
+      delimiter: header.delimiter,
+      fields: header.fields,
+      fieldText: header.fieldText,
+      rows: [],
+    }
+    lane.delimiter = header.delimiter
+    lane.fields = header.fields
+    lane.fieldText = header.fieldText
+  }
 
   splitLines(input).forEach((line, index) => {
     const lineNumber = index + 1
@@ -189,29 +279,33 @@ function parseStreamInternal(input) {
     }
 
     const open =
-      current === null
-        ? null
+      anonymous === null
+        ? { taggedLanes: lanes }
         : {
-            delimiter: current.delimiter,
-            fields: current.fields,
-            fieldText: current.fieldText,
-            rowCount: current.rows.length,
+            delimiter: anonymous.delimiter,
+            fields: anonymous.fields,
+            fieldText: anonymous.fieldText,
+            rowCount: anonymous.rows.length,
+            taggedLanes: lanes,
           }
     const step = classifyLine(line, lineNumber, open)
 
     if (step.kind === 'trailer') {
-      segments.push(current)
-      current = null
+      pushAnonymousSegment()
+      anonymous = null
       return
     }
     if (step.kind === 'continuation') {
       return
     }
+    if (step.kind === 'tag-header') {
+      sawTaggedSyntax = true
+      ensureLane(step.header.tag, step.header, lineNumber)
+      return
+    }
     if (step.kind === 'header') {
-      if (current !== null) {
-        segments.push(current)
-      }
-      current = {
+      pushAnonymousSegment()
+      anonymous = {
         delimiter: step.header.delimiter,
         fields: step.header.fields,
         fieldText: step.header.fieldText,
@@ -219,14 +313,33 @@ function parseStreamInternal(input) {
       }
       return
     }
-    current.rows.push(step.cells)
+    if (step.kind === 'tagged-row') {
+      sawTaggedSyntax = true
+      lanes.get(step.tag).current.rows.push(step.cells)
+      return
+    }
+    if (anonymous === null) {
+      throw toonlError(lineNumber, 'row before header')
+    }
+    anonymous.rows.push(step.cells)
   })
 
-  if (current !== null) {
-    segments.push(current)
+  if (!sawTaggedSyntax) {
+    pushAnonymousSegment()
+    return anonymousSegments
   }
 
-  return segments
+  const output = []
+  pushAnonymousSegment()
+  output.push(...anonymousSegments)
+  for (const tag of laneOrder) {
+    const lane = lanes.get(tag)
+    output.push(...lane.segments)
+    if (lane.current !== null) {
+      output.push(lane.current)
+    }
+  }
+  return output
 }
 
 export function parseStream(input) {
@@ -304,6 +417,7 @@ function createDecodeState(cursor = null) {
     activeHeaderLine: cursor ? cursor.activeHeaderLine : null,
     rowsSinceHeader: cursor ? cursor.rowsSinceHeader : 0,
     anchor: cursor?.anchor ?? null,
+    taggedLanes: new Map(),
   }
 }
 
@@ -322,7 +436,7 @@ function parseCursorHeader(cursor) {
     throw toonlError(0, 'invalid cursor activeHeaderLine')
   }
   const header = parseHeaderLine(cursor.activeHeaderLine.trimEnd(), 0)
-  if (header === null || header.continuation) {
+  if (header === null || header.continuation || header.tag !== null) {
     throw toonlError(0, 'invalid cursor activeHeaderLine')
   }
   return {
@@ -404,7 +518,11 @@ function consumeDecodeLine(state, line, rawLine = `${line}\n`, lineStartOffset =
     return undefined
   }
 
-  const step = classifyLine(line, state.lineNumber, state.open)
+  const open =
+    state.open === null
+      ? { taggedLanes: state.taggedLanes }
+      : { ...state.open, taggedLanes: state.taggedLanes }
+  const step = classifyLine(line, state.lineNumber, open)
   if (step.kind === 'trailer') {
     state.open = null
     return undefined
@@ -422,6 +540,24 @@ function consumeDecodeLine(state, line, rawLine = `${line}\n`, lineStartOffset =
       rowCount: 0,
     }
     return undefined
+  }
+  if (step.kind === 'tag-header') {
+    const tag = step.header.tag
+    if (!state.taggedLanes.has(tag) && state.taggedLanes.size >= TAGGED_LANE_LIMIT) {
+      throw toonlError(state.lineNumber, 'too many tagged lanes')
+    }
+    state.taggedLanes.set(tag, {
+      delimiter: step.header.delimiter,
+      fields: step.header.fields,
+      fieldText: step.header.fieldText,
+      rowCount: 0,
+    })
+    return undefined
+  }
+  if (step.kind === 'tagged-row') {
+    const lane = state.taggedLanes.get(step.tag)
+    lane.rowCount += 1
+    return rowRecord(lane.fields, step.cells, state.lineNumber)
   }
 
   state.open.rowCount += 1

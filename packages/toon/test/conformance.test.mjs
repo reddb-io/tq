@@ -220,7 +220,13 @@ function rejectV01Toonl(input) {
   input.split(/\n/).forEach((rawLine, index) => {
     const lineNumber = index + 1
     const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
-    if (line === '' || !line.startsWith('[')) {
+    if (line === '') {
+      return
+    }
+    if (!line.startsWith('[')) {
+      if (/^[A-Za-z0-9_-]+:/.test(line)) {
+        throw new Error(`line ${lineNumber}: row arity mismatch`)
+      }
       return
     }
     const close = line.indexOf(']')

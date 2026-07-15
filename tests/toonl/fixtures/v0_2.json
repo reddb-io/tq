@@ -77,6 +77,117 @@
       "kind": "v0.1-error",
       "input": "[]{id,name}:\n1,Ada\n[~]{id,name}:\n2,Linus\n",
       "expectedError": "invalid header delimiter"
+    },
+    {
+      "name": "decode/tagged-row-interleave-to-per-lane-segments",
+      "kind": "decode",
+      "input": "[]<req>{method,path,status}:\n[]<metric>{name,value}:\nreq:GET,/health,200\nmetric:cpu,0.42\nreq:POST,/login,401\nmetric:cpu,0.55\n",
+      "segments": [
+        {
+          "delimiter": ",",
+          "fields": ["method", "path", "status"],
+          "rows": [
+            ["GET", "/health", "200"],
+            ["POST", "/login", "401"]
+          ]
+        },
+        {
+          "delimiter": ",",
+          "fields": ["name", "value"],
+          "rows": [
+            ["cpu", "0.42"],
+            ["cpu", "0.55"]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "decode/tagged-row-coexists-with-anonymous-lane",
+      "kind": "decode",
+      "input": "[]{event}:\n[]<audit>{actor,action}:\nstarted\naudit:alice,login\nfinished\n",
+      "segments": [
+        {
+          "delimiter": ",",
+          "fields": ["event"],
+          "rows": [
+            ["started"],
+            ["finished"]
+          ]
+        },
+        {
+          "delimiter": ",",
+          "fields": ["actor", "action"],
+          "rows": [
+            ["alice", "login"]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "decode/tagged-row-redefinition-rotates-lane",
+      "kind": "decode",
+      "input": "[]<req>{method,path}:\nreq:GET,/health\n[]<req>{method,path,status}:\nreq:POST,/login,401\n",
+      "segments": [
+        {
+          "delimiter": ",",
+          "fields": ["method", "path"],
+          "rows": [
+            ["GET", "/health"]
+          ]
+        },
+        {
+          "delimiter": ",",
+          "fields": ["method", "path", "status"],
+          "rows": [
+            ["POST", "/login", "401"]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "close-transform/tagged-row-per-lane-documents",
+      "kind": "close-transform",
+      "input": "[]<req>{method,path,status}:\n[]<metric>{name,value}:\nreq:GET,/health,200\nmetric:cpu,0.42\nreq:POST,/login,401\nmetric:cpu,0.55\n",
+      "expectedToonDocuments": [
+        "[2]{method,path,status}:\n  GET,/health,200\n  POST,/login,401\n",
+        "[2]{name,value}:\n  cpu,0.42\n  cpu,0.55\n"
+      ]
+    },
+    {
+      "name": "error/tagged-row-live-lane-overflow",
+      "kind": "error",
+      "input": "[]<a>{v}:\n[]<b>{v}:\n[]<c>{v}:\n[]<d>{v}:\n[]<e>{v}:\n[]<f>{v}:\n[]<g>{v}:\n[]<h>{v}:\n[]<i>{v}:\n",
+      "expectedError": "too many tagged lanes"
+    },
+    {
+      "name": "error/tagged-row-unknown-tag",
+      "kind": "error",
+      "input": "[]<req>{method,path}:\nmetric:cpu,0.42\n",
+      "expectedError": "unknown tag"
+    },
+    {
+      "name": "error/tagged-row-invalid-tag-declaration",
+      "kind": "error",
+      "input": "[]<bad:tag>{v}:\n",
+      "expectedError": "invalid tag"
+    },
+    {
+      "name": "error/tagged-row-invalid-tag-prefix",
+      "kind": "error",
+      "input": "[]<req>{v}:\nreq~x:1\n",
+      "expectedError": "invalid tag"
+    },
+    {
+      "name": "v0.1-reject/tagged-schema-declaration",
+      "kind": "v0.1-error",
+      "input": "[]<req>{method,path}:\nreq:GET,/health\n",
+      "expectedError": "invalid header"
+    },
+    {
+      "name": "v0.1-reject/tagged-row",
+      "kind": "v0.1-error",
+      "input": "[]{method,path}:\nreq:GET,/health\n",
+      "expectedError": "row arity mismatch"
     }
   ]
 }

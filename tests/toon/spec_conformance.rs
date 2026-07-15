@@ -352,7 +352,13 @@ fn reject_v0_1_toonl(input: &str) -> Result<(), String> {
     for (offset, raw_line) in input.lines().enumerate() {
         let line_number = offset + 1;
         let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
-        if line.is_empty() || !line.starts_with('[') {
+        if line.is_empty() {
+            continue;
+        }
+        if !line.starts_with('[') {
+            if looks_like_tagged_row(line) {
+                return Err(format!("line {line_number}: row arity mismatch"));
+            }
             continue;
         }
         let Some(close_bracket) = line[1..].find(']') else {
@@ -371,6 +377,16 @@ fn reject_v0_1_toonl(input: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn looks_like_tagged_row(line: &str) -> bool {
+    let Some(colon) = line.find(':') else {
+        return false;
+    };
+    colon > 0
+        && line[..colon]
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 fn encode_toonl_records_fixture(test: &Json) -> String {
