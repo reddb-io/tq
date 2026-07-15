@@ -93,6 +93,18 @@ test('decodeLines validates each segment trailer against the rows it saw', async
   assert.equal(error.reason, 'trailer count mismatch')
 })
 
+test('decodeLines accepts matching continuation headers and rejects mismatches', async () => {
+  assert.deepEqual(await collect('[]{id,name}:\n1,Ada\n[~]{id,name}:\n2,Linus\n[=2]\n'), [
+    { id: 1, name: 'Ada' },
+    { id: 2, name: 'Linus' },
+  ])
+
+  await assert.rejects(
+    () => collect('[]{id,name}:\n1,Ada\n[~]{id,role}:\n2,dev\n'),
+    /continuation header mismatch/,
+  )
+})
+
 test('decodeLines rejects rows before a header and reserved list prefixes', async () => {
   await assert.rejects(() => collect('1,Ada\n'), /row before header/)
   await assert.rejects(() => collect('[]{id,name}:\n- 1,Ada\n'), /reserved line prefix/)
@@ -132,6 +144,27 @@ test('encodeLines can leave the stream trailer-free', () => {
     encodeRecords([{ id: 1 }, { id: 2 }], { delimiter: '|' }),
     '[|]{id}:\n1\n2\n[=2]\n',
   )
+})
+
+test('encodeLines emits continuation headers only when configured', () => {
+  const records = [
+    { id: 1, name: 'Ada' },
+    { id: 2, name: 'Linus' },
+    { id: 3, name: 'Grace' },
+  ]
+
+  assert.equal(encodeRecords(records), '[]{id,name}:\n1,Ada\n2,Linus\n3,Grace\n[=3]\n')
+  assert.equal(
+    encodeRecords(records, { continuationEveryRows: 2 }),
+    '[]{id,name}:\n1,Ada\n2,Linus\n[~]{id,name}:\n3,Grace\n[=3]\n',
+  )
+
+  const encoder = new ToonlEncoder(',', ['id', 'name'])
+  encoder.setContinuationEveryRows(2)
+  encoder.pushRow({ id: 1, name: 'Ada' })
+  encoder.pushRow({ id: 2, name: 'Linus' })
+  encoder.pushRow({ id: 3, name: 'Grace' })
+  assert.equal(encoder.finish(), '[]{id,name}:\n1,Ada\n2,Linus\n[~]{id,name}:\n3,Grace\n[=3]\n')
 })
 
 test('encodeLines output decodes back to the records it was given', async () => {
