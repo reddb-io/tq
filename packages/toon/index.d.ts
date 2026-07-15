@@ -26,6 +26,12 @@ export interface ParseOptions {
   expandPaths?: 'safe' | boolean
 }
 
+/** Encoder options. Defaults preserve the canonical v3 output profile. */
+export interface SerializeOptions {
+  /** Emit recursive-brace tabular headers for uniform nested object fields. */
+  nestedTabularHeaders?: boolean
+}
+
 /** A TOON decode failure, carrying the 1-based source line. */
 export class ToonError extends Error {
   readonly line: number
@@ -53,7 +59,7 @@ export function parseDocument(
 ): { [key: string]: JsonValue }
 
 /** Encodes a JSON value as canonical TOON (default profile). */
-export function serialize(value: JsonValue): string
+export function serialize(value: JsonValue, options?: SerializeOptions): string
 
 /** An object-rooted JSON value. */
 export type JsonObject = { [key: string]: JsonValue }
