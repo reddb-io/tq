@@ -1,0 +1,3 @@
+[2]{id,customer{name,country}}:
+  1,Ada,UK
+  2,Bob,US

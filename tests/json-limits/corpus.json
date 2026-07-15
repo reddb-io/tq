@@ -204,6 +204,15 @@
       }
     },
     {
+      "name": "structure/nested-tabular-header-encode-option",
+      "category": "structure",
+      "rawJson": "{\"orders\":[{\"id\":1,\"customer\":{\"name\":\"Ada\",\"country\":\"UK\"},\"total\":10.5},{\"id\":2,\"customer\":{\"name\":\"Bob\",\"country\":\"US\"},\"total\":20}]}",
+      "expected": {
+        "js": { "toon": "orders[2]:\n  - id: 1\n    customer:\n      name: Ada\n      country: UK\n    total: 10.5\n  - id: 2\n    customer:\n      name: Bob\n      country: US\n    total: 20\n", "nestedHeaderToon": "orders[2]{id,customer{name,country},total}:\n  1,Ada,UK,10.5\n  2,Bob,US,20\n", "roundTripJson": "{\"orders\":[{\"id\":1,\"customer\":{\"name\":\"Ada\",\"country\":\"UK\"},\"total\":10.5},{\"id\":2,\"customer\":{\"name\":\"Bob\",\"country\":\"US\"},\"total\":20}]}" },
+        "rust": { "toon": "orders[2]:\n  - id: 1\n    customer:\n      name: Ada\n      country: UK\n    total: 10.5\n  - id: 2\n    customer:\n      name: Bob\n      country: US\n    total: 20\n", "nestedHeaderToon": "orders[2]{id,customer{name,country},total}:\n  1,Ada,UK,10.5\n  2,Bob,US,20\n", "roundTripJson": "{\"orders\":[{\"id\":1,\"customer\":{\"name\":\"Ada\",\"country\":\"UK\"},\"total\":10.5},{\"id\":2,\"customer\":{\"name\":\"Bob\",\"country\":\"US\"},\"total\":20}]}" }
+      }
+    },
+    {
       "name": "adversarial/toon-324-array-header-shaped-string",
       "category": "adversarial-round-trip",
       "rawJson": "[\"[N]:\"]",
