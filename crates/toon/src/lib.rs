@@ -18,7 +18,7 @@ pub const DEFAULT_INDENT: usize = 2;
 /// disables the guard for trusted input.
 pub const DEFAULT_MAX_DEPTH: usize = 1000;
 
-/// The document delimiter used by the encoder (spec §11.1, default profile).
+/// The default document delimiter used by the encoder (spec §11.1).
 const DOCUMENT_DELIMITER: char = ',';
 const TOONL_TAGGED_LANE_LIMIT: usize = 8;
 
@@ -53,6 +53,8 @@ pub struct EncodeOptions {
     pub nested_tabular_headers: bool,
     /// Emit brace-header tabular rows for keyed maps with uniform object values.
     pub keyed_map_collapse: bool,
+    /// Active delimiter for encoded array and tabular rows: comma, pipe, or tab.
+    pub delimiter: char,
     /// Maximum nesting depth for fallible encoding. `0` disables the guard.
     pub max_depth: usize,
 }
@@ -159,6 +161,7 @@ impl Default for EncodeOptions {
         Self {
             nested_tabular_headers: false,
             keyed_map_collapse: false,
+            delimiter: DOCUMENT_DELIMITER,
             max_depth: DEFAULT_MAX_DEPTH,
         }
     }
@@ -745,7 +748,10 @@ impl Value {
                 write_array(&mut output, None, &array.values(), 0, false, options)?
             }
             Self::Object(document) => document.write_fields(&mut output, 0, options)?,
-            value => output.push_str(&primitive_text(value, DOCUMENT_DELIMITER)),
+            value => {
+                validate_encode_delimiter(options.delimiter)?;
+                output.push_str(&primitive_text(value, options.delimiter));
+            }
         }
         Ok(output)
     }
@@ -2576,19 +2582,28 @@ fn parse_map_header(content: &str) -> Result<MapHeader, HeaderError> {
     if key.is_empty() && !key_quoted {
         return Err(HeaderError("expected non-empty field name"));
     }
-    let fields = parse_header_fields(&content[open + 1..content.len() - 1], DOCUMENT_DELIMITER)
-        .map_err(|error| {
-            if error.0 == "duplicate key" {
-                HeaderError("duplicate key")
-            } else {
-                HeaderError("invalid keyed map header")
-            }
-        })?;
+    let mut fields_text = &content[open + 1..content.len() - 1];
+    let delimiter = if let Some(rest) = fields_text.strip_prefix('|') {
+        fields_text = rest;
+        '|'
+    } else if let Some(rest) = fields_text.strip_prefix('\t') {
+        fields_text = rest;
+        '\t'
+    } else {
+        DOCUMENT_DELIMITER
+    };
+    let fields = parse_header_fields(fields_text, delimiter).map_err(|error| {
+        if error.0 == "duplicate key" {
+            HeaderError("duplicate key")
+        } else {
+            HeaderError("invalid keyed map header")
+        }
+    })?;
 
     Ok(MapHeader {
         key,
         key_quoted,
-        delimiter: DOCUMENT_DELIMITER,
+        delimiter,
         fields,
     })
 }
@@ -3421,6 +3436,7 @@ fn canonical_number(value: &str) -> String {
 // ---------------------------------------------------------------------------
 
 fn check_encode_depth(depth: usize, options: EncodeOptions) -> Result<(), EncodeError> {
+    validate_encode_delimiter(options.delimiter)?;
     if options.max_depth != 0 && depth > options.max_depth {
         return Err(EncodeError {
             message: "maximum nesting depth exceeded",
@@ -3428,6 +3444,16 @@ fn check_encode_depth(depth: usize, options: EncodeOptions) -> Result<(), Encode
         });
     }
     Ok(())
+}
+
+fn validate_encode_delimiter(delimiter: char) -> Result<(), EncodeError> {
+    if matches!(delimiter, DOCUMENT_DELIMITER | '|' | '\t') {
+        return Ok(());
+    }
+    Err(EncodeError {
+        message: "invalid array header",
+        max_depth: None,
+    })
 }
 
 fn write_indent(output: &mut String, depth: usize) {
@@ -3461,7 +3487,7 @@ fn write_field(
         value => {
             output.push_str(&canonical_key(key));
             output.push_str(": ");
-            output.push_str(&primitive_text(value, DOCUMENT_DELIMITER));
+            output.push_str(&primitive_text(value, options.delimiter));
             output.push('\n');
         }
     }
@@ -3492,13 +3518,13 @@ fn write_array(
     }
 
     if values.iter().all(Value::is_primitive) {
-        write_array_header(output, key, values.len(), None);
+        write_array_header(output, key, values.len(), None, options.delimiter);
         output.push(' ');
         let cells = values
             .iter()
-            .map(|value| primitive_text(value, DOCUMENT_DELIMITER))
+            .map(|value| primitive_text(value, options.delimiter))
             .collect::<Vec<_>>();
-        output.push_str(&cells.join(&DOCUMENT_DELIMITER.to_string()));
+        output.push_str(&cells.join(&options.delimiter.to_string()));
         output.push('\n');
         return Ok(());
     }
@@ -3510,7 +3536,13 @@ fn write_array(
     } else {
         tabular_shape(values, options, depth + 1)?
     } {
-        write_array_header(output, key, values.len(), Some(&shape.fields));
+        write_array_header(
+            output,
+            key,
+            values.len(),
+            Some(&shape.fields),
+            options.delimiter,
+        );
         output.push('\n');
         for value in values {
             let Value::Object(_) = value else {
@@ -3522,16 +3554,16 @@ fn write_array(
                 .iter()
                 .map(|path| {
                     let cell = value_at_path(value, path).expect("tabular_shape checked the path");
-                    primitive_text(cell, DOCUMENT_DELIMITER)
+                    primitive_text(cell, options.delimiter)
                 })
                 .collect::<Vec<_>>();
-            output.push_str(&cells.join(&DOCUMENT_DELIMITER.to_string()));
+            output.push_str(&cells.join(&options.delimiter.to_string()));
             output.push('\n');
         }
         return Ok(());
     }
 
-    write_array_header(output, key, values.len(), None);
+    write_array_header(output, key, values.len(), None, options.delimiter);
     output.push('\n');
     for value in values {
         write_indent(output, depth + 1);
@@ -3564,7 +3596,7 @@ fn write_list_item(
         }
         value => {
             output.push_str("- ");
-            output.push_str(&primitive_text(value, DOCUMENT_DELIMITER));
+            output.push_str(&primitive_text(value, options.delimiter));
             output.push('\n');
         }
     }
@@ -3576,20 +3608,31 @@ fn write_array_header(
     key: Option<&str>,
     len: usize,
     fields: Option<&[HeaderFieldShape]>,
+    delimiter: char,
 ) {
     if let Some(key) = key {
         output.push_str(&canonical_key(key));
     }
     output.push('[');
     output.push_str(&len.to_string());
+    push_delimiter_prefix(output, delimiter);
     output.push(']');
     if let Some(fields) = fields {
         output.push('{');
-        let names = fields.iter().map(header_field_text).collect::<Vec<_>>();
-        output.push_str(&names.join(&DOCUMENT_DELIMITER.to_string()));
+        let names = fields
+            .iter()
+            .map(|field| header_field_text(field, delimiter))
+            .collect::<Vec<_>>();
+        output.push_str(&names.join(&delimiter.to_string()));
         output.push('}');
     }
     output.push(':');
+}
+
+fn push_delimiter_prefix(output: &mut String, delimiter: char) {
+    if delimiter != DOCUMENT_DELIMITER {
+        output.push(delimiter);
+    }
 }
 
 fn write_keyed_map(
@@ -3603,12 +3646,13 @@ fn write_keyed_map(
     check_encode_depth(depth, options)?;
     output.push_str(&canonical_key(key));
     output.push('{');
+    push_delimiter_prefix(output, options.delimiter);
     let names = shape
         .fields
         .iter()
-        .map(header_field_text)
+        .map(|field| header_field_text(field, options.delimiter))
         .collect::<Vec<_>>();
-    output.push_str(&names.join(&DOCUMENT_DELIMITER.to_string()));
+    output.push_str(&names.join(&options.delimiter.to_string()));
     output.push_str("}:\n");
     for field in &document.fields {
         let Value::Object(row) = &field.value else {
@@ -3624,25 +3668,25 @@ fn write_keyed_map(
             .map(|path| {
                 let cell =
                     value_at_path(&row_value, path).expect("keyed_map_shape checked row paths");
-                primitive_text(cell, DOCUMENT_DELIMITER)
+                primitive_text(cell, options.delimiter)
             })
             .collect::<Vec<_>>();
-        output.push_str(&cells.join(&DOCUMENT_DELIMITER.to_string()));
+        output.push_str(&cells.join(&options.delimiter.to_string()));
         output.push('\n');
     }
     Ok(())
 }
 
-fn header_field_text(field: &HeaderFieldShape) -> String {
+fn header_field_text(field: &HeaderFieldShape, delimiter: char) -> String {
     if field.children.is_empty() {
         return canonical_key(&field.key);
     }
     let children = field
         .children
         .iter()
-        .map(header_field_text)
+        .map(|child| header_field_text(child, delimiter))
         .collect::<Vec<_>>()
-        .join(&DOCUMENT_DELIMITER.to_string());
+        .join(&delimiter.to_string());
     format!("{}{{{children}}}", canonical_key(&field.key))
 }
 
