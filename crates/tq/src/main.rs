@@ -11,7 +11,7 @@ use reddb_io_toon::{
 };
 
 const USAGE: &str =
-    "usage: tq [-p toon|json|toonl] [-o toon|json|toonl] [-r] [-c] [-s|--slurp] [--delimiter comma|tab|pipe] [--nested-tabular-headers] [--keyed-map-collapse] <query> [file]";
+    "usage: tq [-p toon|json|toonl] [-o toon|json|toonl] [-r] [-c] [-s|--slurp] [--delimiter comma|tab|pipe] [--nested-tabular-headers] [--keyed-map-collapse] [--primitive-array-columns] <query> [file]";
 const TRIM_USAGE: &str = "usage: tq trim --keep-last N [--in-place] [FILE]";
 const CLOSE_USAGE: &str = "usage: tq close [--per-lane|--interleaved] [FILE]";
 const CHECK_USAGE: &str = "usage: tq check [-p toon|toonl] [FILE]";
@@ -35,6 +35,7 @@ struct Options {
     delimiter: char,
     nested_tabular_headers: bool,
     keyed_map_collapse: bool,
+    primitive_array_columns: bool,
 }
 
 #[derive(Debug)]
@@ -218,6 +219,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Options, String> {
     let mut delimiter = ',';
     let mut nested_tabular_headers = false;
     let mut keyed_map_collapse = false;
+    let mut primitive_array_columns = false;
     let mut positional = Vec::new();
     let mut args = args.peekable();
 
@@ -240,6 +242,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Options, String> {
             }
             "--nested-tabular-headers" => nested_tabular_headers = true,
             "--keyed-map-collapse" => keyed_map_collapse = true,
+            "--primitive-array-columns" => primitive_array_columns = true,
             "--" => {
                 positional.extend(args);
                 break;
@@ -268,6 +271,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Options, String> {
         delimiter,
         nested_tabular_headers,
         keyed_map_collapse,
+        primitive_array_columns,
     })
 }
 
@@ -1949,6 +1953,7 @@ fn format_values(values: &[Value], options: &Options) -> Result<String, String> 
                         .try_to_toon_with_options(EncodeOptions {
                             nested_tabular_headers: options.nested_tabular_headers,
                             keyed_map_collapse: options.keyed_map_collapse,
+                            primitive_array_columns: options.primitive_array_columns,
                             delimiter: options.delimiter,
                             ..EncodeOptions::default()
                         })
