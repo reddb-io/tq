@@ -23,9 +23,24 @@ path = "../../tests/runners/rust/tq/behavior.rs"
 name = "corpus"
 path = "../../tests/runners/rust/tq/corpus.rs"
 
+[[test]]
+name = "upgrade"
+path = "../../tests/runners/rust/tq/upgrade.rs"
+
 [dependencies]
 reddb-io-toon = { path = "../toon", version = "0.12.0" }
 regex = "1"
 serde_json = { version = "1", features = ["preserve_order"] }
 # YAML input parser.
 serde_norway = "0.9.42"
+# `tq upgrade` checksum verification.
+sha2 = "0.10"
+# `tq upgrade` HTTP client. Blocking (no async runtime to drag in) and pinned
+# to rustls, because native-tls would put an OpenSSL dependency in the way of
+# the fully-static musl release assets. `gzip` stays off: the release assets
+# are already compressed and the API responses are small.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+# The upgrade suite computes the checksums its fake release advertises.
+sha2 = "0.10"
