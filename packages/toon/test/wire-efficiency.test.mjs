@@ -136,11 +136,11 @@ test('cyclic discriminated-array corpus decodes identically for JS', () => {
 
   for (const testCase of fixture.cases) {
     assert.deepEqual(parse(testCase.input), testCase.expected, `${testCase.name}: decoded value`)
-    if (testCase.failClosedV3Strict === true) {
-      assert.throws(
-        () => rejectV3Strict(testCase.input),
-        /invalid root form/,
-        `${testCase.name}: strict v3 rejects extension form`,
+    if (testCase.strictV3Literal !== undefined) {
+      assert.deepEqual(
+        parse(testCase.input, { cyclicDiscriminatedArrays: false }),
+        testCase.strictV3Literal,
+        `${testCase.name}: strict v3 reads the literal grouped object`,
       )
     }
   }
@@ -181,6 +181,34 @@ test('cyclic discriminated-array encoding is opt-in and falls back losslessly fo
     'ineligible cyclic array falls back to canonical v3.3',
   )
   assert.deepEqual(parse(serialize(ineligible, { cyclicDiscriminatedArrays: true })), ineligible)
+
+  const nonUniformNestedPayload = {
+    events: Array.from({ length: 12 }, (_, index) => {
+      const type = index % 2 === 0 ? 'login' : 'purchase'
+      return type === 'login'
+        ? { type, seq: index + 1, payload: index === 0 ? { ok: true, ip: '127.0.0.1' } : { ok: true } }
+        : { type, seq: index + 1, payload: { amount: index + 1 } }
+    }),
+  }
+  assert.equal(
+    serialize(nonUniformNestedPayload, { cyclicDiscriminatedArrays: true }),
+    serialize(nonUniformNestedPayload),
+    'non-uniform nested payload shape within a group falls back to v3.3',
+  )
+})
+
+test('cyclic discriminated-array wire has no directive references in shipped JS/corpus/goldens', () => {
+  for (const relative of [
+    'packages/toon/src/toon.js',
+    'crates/toon/src/lib.rs',
+    'tests/corpus/wire-efficiency/cyclic-discriminated-arrays.json',
+    'tests/golden/tq/cyclic-discriminated-arrays-output/stdout.toon',
+  ]) {
+    const content = readFileSync(join(REPO_ROOT, relative), 'utf8')
+    assert.equal(content.includes('@toon-cyclic-discriminated-array/1'), false, relative)
+    assert.equal(content.includes('@array $C'), false, relative)
+    assert.equal(content.includes('@group '), false, relative)
+  }
 })
 
 test('primitive-array column encoding is opt-in and falls back losslessly for ineligible values in JS', () => {
@@ -235,9 +263,6 @@ test('object-array column encoding is opt-in and falls back losslessly for ineli
 })
 
 function rejectV3Strict(input) {
-  if (input.startsWith('@toon-cyclic-discriminated-array/1\n')) {
-    throw new Error('line 1: invalid root form')
-  }
   input.split(/\n/).forEach((rawLine, index) => {
     const lineNumber = index + 1
     const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
