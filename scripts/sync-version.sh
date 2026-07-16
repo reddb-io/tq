@@ -23,4 +23,10 @@ sed_i "s|\(reddb-io-toon = { path = \"../toon\", version = \"\)[^\"]*|\1${VERSIO
 # anchoring on the two-space indent keeps this away from any nested version.
 sed_i "s|^  \"version\": \".*\"|  \"version\": \"${VERSION}\"|" packages/toon/package.json
 
+# The VS Code extension ships in lockstep too, but vsce and the Marketplace
+# only accept plain x.y.z versions, so prerelease suffixes (-next.N) are
+# stripped down to the base version.
+EXTENSION_VERSION="${VERSION%%-*}"
+sed_i "s|^  \"version\": \".*\"|  \"version\": \"${EXTENSION_VERSION}\"|" packages/vscode-toon/package.json
+
 bash "$(dirname "$0")/check-versions.sh"
