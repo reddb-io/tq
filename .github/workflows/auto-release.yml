@@ -59,7 +59,7 @@ jobs:
           cargo generate-lockfile
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml crates/tq/Cargo.toml packages/toon/package.json Cargo.lock
+          git add Cargo.toml crates/tq/Cargo.toml packages/toon/package.json packages/vscode-toon/package.json Cargo.lock
           git commit -m "chore: release ${VERSION}"
           if ! git push origin HEAD:main; then
             # main moved while we worked. The push that beat us triggers its

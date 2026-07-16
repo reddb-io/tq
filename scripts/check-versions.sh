@@ -17,4 +17,12 @@ if [[ "$WORKSPACE_VERSION" != "$NPM_VERSION" ]]; then
   echo "version drift: workspace=${WORKSPACE_VERSION} @reddb-io/toon=${NPM_VERSION:-<missing>}" >&2
   exit 1
 fi
+
+# The VS Code extension carries the base x.y.z only (vsce rejects prerelease
+# suffixes), so it is compared against the workspace version's base.
+VSCODE_VERSION="$(sed -n 's|^  "version": "\([^"]*\)".*|\1|p' packages/vscode-toon/package.json)"
+if [[ "${WORKSPACE_VERSION%%-*}" != "$VSCODE_VERSION" ]]; then
+  echo "version drift: workspace=${WORKSPACE_VERSION} vscode-toon=${VSCODE_VERSION:-<missing>}" >&2
+  exit 1
+fi
 echo "versions consistent: ${WORKSPACE_VERSION}"

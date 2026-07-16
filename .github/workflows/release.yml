@@ -242,9 +242,40 @@ jobs:
           name: ${{ matrix.asset_name }}
           path: tq-${{ matrix.asset_name }}*
 
+  build-vsix:
+    name: Build VS Code extension (.vsix)
+    needs: [plan]
+    if: needs.plan.outputs.should_skip != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Sync release version
+        # sync-version.sh writes the base x.y.z into the extension manifest
+        # (vsce rejects -next.N prerelease suffixes).
+        run: bash scripts/sync-version.sh "${{ needs.plan.outputs.package_version }}"
+      - name: Package .vsix
+        working-directory: packages/vscode-toon
+        run: |
+          set -euo pipefail
+          pnpm dlx @vscode/vsce package -o reddb-toon.vsix
+          # Smoke: the packaged manifest must carry the synced base version.
+          EXPECTED="$(sed -n 's|^  "version": "\([^"]*\)".*|\1|p' package.json)"
+          unzip -p reddb-toon.vsix extension/package.json | grep -F "\"version\": \"${EXPECTED}\""
+          sha256sum reddb-toon.vsix > reddb-toon.vsix.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: packages/vscode-toon/reddb-toon.vsix*
+
   publish-github:
     name: GitHub Release
-    needs: [plan, build]
+    needs: [plan, build, build-vsix]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -268,7 +299,7 @@ jobs:
           set -euo pipefail
           (
             cd release
-            find . -maxdepth 1 -type f -name 'tq-*' ! -name '*.sha256' -print0 \
+            find . -maxdepth 1 -type f \( -name 'tq-*' -o -name '*.vsix' \) ! -name '*.sha256' -print0 \
               | sort -z \
               | xargs -0 sha256sum \
               | sed 's#  \./#  #'
@@ -353,6 +384,11 @@ jobs:
           **Cargo:**
           \`\`\`bash
           cargo install reddb-io-tq   # installs the \`tq\` binary
+          \`\`\`
+
+          **VS Code extension** (RedDB Toon — syntax highlighting for TOON and TOONL):
+          \`\`\`bash
+          curl -fsSL https://github.com/${REPO}/releases/download/${TAG}/reddb-toon.vsix -o reddb-toon.vsix && code --install-extension reddb-toon.vsix
           \`\`\`
 
           **Prebuilt binaries:**

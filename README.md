@@ -208,13 +208,19 @@ Declarative syntax highlighting for `.toon` and `.toonl` files, plus `toon`/`too
 
 Use it when reading or writing TOON documents, TOONL streams, or the spec documents in [`docs/`](docs/) inside VS Code.
 
-Install from source (Marketplace publication is planned; the extension is not listed yet):
+One-liner from a GitHub release (the `.vsix` ships as a release asset from the next stable release onward):
 
 ```bash
-cd packages/vscode-toon
-pnpm dlx @vscode/vsce package
-code --install-extension reddb-toon-*.vsix
+curl -fsSL https://github.com/reddb-io/toon/releases/latest/download/reddb-toon.vsix -o /tmp/reddb-toon.vsix && code --install-extension /tmp/reddb-toon.vsix
 ```
+
+One-liner from a clone:
+
+```bash
+(cd packages/vscode-toon && pnpm dlx @vscode/vsce package -o reddb-toon.vsix) && code --install-extension packages/vscode-toon/reddb-toon.vsix
+```
+
+VSCodium and Cursor users: swap `code` for `codium` / `cursor`. Once the extension is listed on the Marketplace and Open VSX (planned), the in-editor one-liner becomes `Ctrl+P` → `ext install reddb-io.reddb-toon`.
 
 Or open `packages/vscode-toon` in VS Code and press `F5` to try the grammars in an Extension Development Host against `examples/sample.toon` and `examples/sample.toonl`.
 

@@ -50,12 +50,24 @@ separators everywhere) and cannot know which row tags were declared by a
 `[]<tag>{...}:` schema. Both trade-offs only ever over-highlight; they never
 hide structure.
 
-## Install locally
+## Install
+
+One-liner from a GitHub release (the `.vsix` ships as a release asset from the
+next stable release onward):
 
 ```sh
-pnpm dlx @vscode/vsce package   # from packages/vscode-toon → reddb-toon-<version>.vsix
-code --install-extension reddb-toon-*.vsix
+curl -fsSL https://github.com/reddb-io/toon/releases/latest/download/reddb-toon.vsix -o /tmp/reddb-toon.vsix && code --install-extension /tmp/reddb-toon.vsix
 ```
+
+One-liner from a clone of this repository:
+
+```sh
+(cd packages/vscode-toon && pnpm dlx @vscode/vsce package -o reddb-toon.vsix) && code --install-extension packages/vscode-toon/reddb-toon.vsix
+```
+
+VSCodium and Cursor users: swap `code` for `codium` / `cursor`. Once the
+extension is listed on the Marketplace and Open VSX (planned), the in-editor
+one-liner becomes `Ctrl+P` → `ext install reddb-io.reddb-toon`.
 
 Or press `F5` with this folder open in VS Code to launch an Extension
 Development Host. `examples/sample.toon` and `examples/sample.toonl` exercise
