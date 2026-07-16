@@ -32,13 +32,18 @@ fn json_model_eq(left: &serde_json::Value, right: &serde_json::Value) -> bool {
         (J::Number(left), J::Number(right)) => number_eq(left, right),
         (J::Array(left), J::Array(right)) => {
             left.len() == right.len()
-                && left.iter().zip(right).all(|(left, right)| json_model_eq(left, right))
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| json_model_eq(left, right))
         }
         (J::Object(left), J::Object(right)) => {
             left.len() == right.len()
-                && left.iter().zip(right).all(|((left_key, left_value), (right_key, right_value))| {
-                    left_key == right_key && json_model_eq(left_value, right_value)
-                })
+                && left.iter().zip(right).all(
+                    |((left_key, left_value), (right_key, right_value))| {
+                        left_key == right_key && json_model_eq(left_value, right_value)
+                    },
+                )
         }
         _ => left == right,
     }
@@ -70,8 +75,11 @@ fn key_strategy() -> impl Strategy<Value = String> {
         // Plain keys: the common path, and the only one a bare key can take.
         "[a-zA-Z_][a-zA-Z0-9_]{0,12}",
         // Keys that must survive quoting.
-        prop::collection::vec(prop::sample::select(SPICY.chars().collect::<Vec<_>>()), 1..6)
-            .prop_map(|chars| chars.into_iter().collect()),
+        prop::collection::vec(
+            prop::sample::select(SPICY.chars().collect::<Vec<_>>()),
+            1..6
+        )
+        .prop_map(|chars| chars.into_iter().collect()),
         // The empty key is legal JSON and a known encoder edge.
         Just(String::new()),
     ]
@@ -80,11 +88,23 @@ fn key_strategy() -> impl Strategy<Value = String> {
 fn string_strategy() -> impl Strategy<Value = String> {
     prop_oneof![
         any::<String>(),
-        prop::collection::vec(prop::sample::select(SPICY.chars().collect::<Vec<_>>()), 0..24)
-            .prop_map(|chars| chars.into_iter().collect()),
+        prop::collection::vec(
+            prop::sample::select(SPICY.chars().collect::<Vec<_>>()),
+            0..24
+        )
+        .prop_map(|chars| chars.into_iter().collect()),
         // Strings that look like other TOON scalars must stay strings.
         prop::sample::select(vec![
-            "", "true", "false", "null", "42", "-0", "1e10", "  padded  ", "a,b", "[1,2]",
+            "",
+            "true",
+            "false",
+            "null",
+            "42",
+            "-0",
+            "1e10",
+            "  padded  ",
+            "a,b",
+            "[1,2]",
         ])
         .prop_map(str::to_owned),
     ]
@@ -117,9 +137,8 @@ fn value_strategy() -> impl Strategy<Value = serde_json::Value> {
     scalar_strategy().prop_recursive(6, 48, 6, |inner| {
         prop_oneof![
             prop::collection::vec(inner.clone(), 0..6).prop_map(serde_json::Value::Array),
-            prop::collection::vec((key_strategy(), inner), 0..6).prop_map(|entries| {
-                serde_json::Value::Object(entries.into_iter().collect())
-            }),
+            prop::collection::vec((key_strategy(), inner), 0..6)
+                .prop_map(|entries| { serde_json::Value::Object(entries.into_iter().collect()) }),
         ]
     })
 }
