@@ -43,7 +43,10 @@ fn json_files(dir: &Path, found: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
-    let mut entries: Vec<_> = entries.filter_map(Result::ok).map(|entry| entry.path()).collect();
+    let mut entries: Vec<_> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .collect();
     entries.sort();
     for path in entries {
         if path.is_dir() {
@@ -67,7 +70,9 @@ fn load_cases() -> Vec<Case> {
         .map(|path| {
             let json_text = fs::read_to_string(path).expect("read dataset");
             let value = Value::from_json_str(&json_text).expect("dataset is valid JSON");
-            let toon_text = value.try_to_canonical_toon().expect("dataset encodes to TOON");
+            let toon_text = value
+                .try_to_canonical_toon()
+                .expect("dataset encodes to TOON");
             let name = path
                 .strip_prefix(&root)
                 .unwrap_or(path)
@@ -75,11 +80,20 @@ fn load_cases() -> Vec<Case> {
                 .to_string_lossy()
                 // Criterion uses the id in directory names; keep it filesystem-safe.
                 .replace(['/', '\\'], "::");
-            Case { name, json_text, toon_text, value }
+            Case {
+                name,
+                json_text,
+                toon_text,
+                value,
+            }
         })
         .collect();
 
-    assert!(!cases.is_empty(), "no benchmark datasets found under {}", root.display());
+    assert!(
+        !cases.is_empty(),
+        "no benchmark datasets found under {}",
+        root.display()
+    );
     cases
 }
 
@@ -89,18 +103,30 @@ fn bench_codec(criterion: &mut Criterion) {
     let mut encode = criterion.benchmark_group("encode");
     for case in &cases {
         encode.throughput(Throughput::Bytes(case.json_text.len() as u64));
-        encode.bench_with_input(BenchmarkId::from_parameter(&case.name), case, |bencher, case| {
-            bencher.iter(|| black_box(&case.value).try_to_canonical_toon().expect("encode"));
-        });
+        encode.bench_with_input(
+            BenchmarkId::from_parameter(&case.name),
+            case,
+            |bencher, case| {
+                bencher.iter(|| {
+                    black_box(&case.value)
+                        .try_to_canonical_toon()
+                        .expect("encode")
+                });
+            },
+        );
     }
     encode.finish();
 
     let mut decode = criterion.benchmark_group("decode");
     for case in &cases {
         decode.throughput(Throughput::Bytes(case.toon_text.len() as u64));
-        decode.bench_with_input(BenchmarkId::from_parameter(&case.name), case, |bencher, case| {
-            bencher.iter(|| Value::parse_toon(black_box(&case.toon_text)).expect("decode"));
-        });
+        decode.bench_with_input(
+            BenchmarkId::from_parameter(&case.name),
+            case,
+            |bencher, case| {
+                bencher.iter(|| Value::parse_toon(black_box(&case.toon_text)).expect("decode"));
+            },
+        );
     }
     decode.finish();
 
