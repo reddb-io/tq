@@ -4,10 +4,10 @@
 
 `tq` is a jq-style query CLI and converter for JSON, YAML, TOON, and TOONL.
 
-It is shipped by the `reddb-io-tq` crate and uses the `reddb-io-toon` library. The TOON extension behavior is specified in [`docs/toon-reddb-spec.md`](../../docs/toon-reddb-spec.md), TOONL v0.2 is specified in [`docs/toonl-reddb-spec.md`](../../docs/toonl-reddb-spec.md), and performance notes live in [`benchmarks/`](../../benchmarks/README.md).
+It is shipped by the `reddb-io-tq` crate and uses the `reddb-io-toon` library. The TOON extension behavior is specified in [`docs/toon-reddb-spec.md`](../../docs/toon-reddb-spec.md), and TOONL v0.2 is specified in [`docs/toonl-reddb-spec.md`](../../docs/toonl-reddb-spec.md).
 
 ```bash
-cargo install reddb-io-tq
+cargo install reddb-io-tq --version 0.8.0
 ```
 
 ## Usage
@@ -19,30 +19,60 @@ tq close [--per-lane|--interleaved] [FILE]
 tq check [-p toon|toonl] [FILE]
 ```
 
-The input format defaults from the file extension when a file is provided. Use `-p` for stdin or when the extension is ambiguous. YAML input is accepted with either `-p yaml` or `-p yml`; output formats are `toon`, `json`, and `toonl`.
+Format matrix:
 
-## Query And Convert
+| Flag | Formats | Notes |
+| --- | --- | --- |
+| `-p` | `toon`, `json`, `toonl`, `yaml`, `yml` | Selects input. File input defaults from `.toon`, `.json`, `.toonl`, `.yaml`, or `.yml`. |
+| `-o` | `toon`, `json`, `toonl` | Selects output. YAML is input-only. |
+
+## Query
+
+The default subcommand is the query pipeline. `.` keeps the current value; field, index, slice, and builtin filters are evaluated by the CLI test suite.
+
+Input:
+
+```json
+{"users":[{"id":1,"name":"Ada"},{"id":2,"name":"Linus"}]}
+```
+
+Command:
 
 ```bash
-printf '{"users":[{"id":1,"name":"Ada"}]}' | tq -p json -o toon .
+tq -p json -o toon '.users[0]'
 ```
+
+Output:
 
 ```toon
-users[1]{id,name}:
-  1,Ada
+id: 1
+name: Ada
 ```
 
-```bash
-printf 'users:\n  - id: 1\n    name: Ada\n' | tq -p yaml -o json -c .
+YAML input works with either `-p yaml` or `-p yml`.
+
+Input:
+
+```yaml
+users:
+  - id: 1
+    name: Ada
 ```
+
+Command:
+
+```bash
+tq -p yaml -o json -c .
+```
+
+Output:
 
 ```json
 {"users":[{"id":1,"name":"Ada"}]}
 ```
 
-- `<query>` is the field/index/slice pipeline used by the test suite. `.` keeps the current value.
-- `-p toon|json|toonl|yaml|yml` selects input.
-- `-o toon|json|toonl` selects output.
+Useful query flags:
+
 - `-r` prints raw scalar strings.
 - `-c` prints compact JSON.
 - `-s` or `--slurp` collects TOONL rows into one array before evaluating the query.
@@ -51,30 +81,176 @@ printf 'users:\n  - id: 1\n    name: Ada\n' | tq -p yaml -o json -c .
 
 TOON output is canonical v3.3 unless an extension flag is enabled. These flags map directly to `reddb_io_toon::EncodeOptions`.
 
-- `--nested-tabular-headers` emits recursive table headers for uniform nested object columns. Spec: [Nested tabular headers](../../docs/proposals/nested-tabular-headers.md).
-- `--keyed-map-collapse` emits compact rows for object maps whose values are uniform objects. Spec: [Keyed-map collapse](../../docs/proposals/keyed-map-collapse.md).
-- `--primitive-array-columns` emits primitive list columns such as `tags[;]` inside otherwise tabular object arrays. Spec: [Primitive-array columns](../../docs/proposals/primitive-array-columns.md).
-- `--object-array-columns` emits child tables for array-valued object columns. Spec: [Child tables and matrix](../../docs/proposals/child-tables-and-matrix.md).
-- `--cyclic-discriminated-arrays` emits the specialized wire for eligible top-level event arrays whose discriminator values repeat in a stable cycle. Spec: [Cyclic discriminated arrays](../../docs/proposals/cyclic-discriminated-arrays.md).
-- `--delimiter comma|tab|pipe` selects the active array and tabular delimiter. Spec: [Delimiter choice](../../docs/proposals/delimiter-choice.md).
+## `--nested-tabular-headers`
+
+Input:
+
+```json
+{"orders":[{"id":1,"customer":{"name":"Ada","country":"UK"},"total":10.5},{"id":2,"customer":{"name":"Bob","country":"US"},"total":20}]}
+```
+
+Command:
 
 ```bash
-printf '{"rows":[{"id":1,"tags":["red","blue"]}]}' \
-  | tq -p json -o toon --primitive-array-columns .
+tq -p json -o toon --nested-tabular-headers .
 ```
+
+Output:
 
 ```toon
-rows[1]{id,tags[;]}:
-  1,red;blue
+orders[2]{id,customer{name,country},total}:
+  1,Ada,UK,10.5
+  2,Bob,US,20
 ```
 
-## TOONL
+Spec: [Nested tabular headers](../../docs/proposals/nested-tabular-headers.md).
 
-TOONL input reads one flat record per row. TOONL output writes append-only segments and rotates schemas as needed.
+## `--keyed-map-collapse`
+
+Input:
+
+```json
+{"people":{"joe":{"first":"Joe","last":"Schmoe"},"mary":{"first":"Mary","last":"Jane"}}}
+```
+
+Command:
 
 ```bash
-printf '{"id":1,"name":"Ada"}\n{"id":2,"name":"Linus"}\n' | tq -p json -o toonl .
+tq -p json -o toon --keyed-map-collapse .
 ```
+
+Output:
+
+```toon
+people{first,last}:
+  joe: Joe,Schmoe
+  mary: Mary,Jane
+```
+
+Spec: [Keyed-map collapse](../../docs/proposals/keyed-map-collapse.md).
+
+## `--primitive-array-columns`
+
+Input:
+
+```json
+{"items":[{"id":1,"tags":["hot","fragile"],"note":"a,b"},{"id":2,"tags":["semi;quoted"],"note":"plain"}]}
+```
+
+Command:
+
+```bash
+tq -p json -o toon --primitive-array-columns .
+```
+
+Output:
+
+```toon
+items[2]{id,tags[;],note}:
+  1,hot;fragile,"a,b"
+  2,"semi;quoted",plain
+```
+
+Spec: [Primitive-array columns](../../docs/proposals/primitive-array-columns.md).
+
+## `--object-array-columns`
+
+Input:
+
+```json
+{"orders":[{"id":1,"items":[{"sku":"a","qty":2},{"sku":"b","qty":1}]},{"id":2,"items":[]}]}
+```
+
+Command:
+
+```bash
+tq -p json -o toon --object-array-columns .
+```
+
+Output:
+
+```toon
+orders[2]{id,items{sku,qty}}:
+  1,2
+    a,2
+    b,1
+  2,0
+```
+
+Spec: [Child tables and matrix](../../docs/proposals/child-tables-and-matrix.md).
+
+## `--cyclic-discriminated-arrays`
+
+Input:
+
+```json
+{"events":[{"type":"login","tenant":"acme","seq":1,"ok":true},{"type":"purchase","tenant":"acme","seq":2,"amount":12.5},{"type":"login","tenant":"acme","seq":3,"ok":false},{"type":"purchase","tenant":"acme","seq":4,"amount":4},{"type":"login","tenant":"acme","seq":5,"ok":true},{"type":"purchase","tenant":"acme","seq":6,"amount":7},{"type":"login","tenant":"acme","seq":7,"ok":true},{"type":"purchase","tenant":"acme","seq":8,"amount":1}]}
+```
+
+Command:
+
+```bash
+tq -p json -o toon --cyclic-discriminated-arrays .
+```
+
+Output:
+
+```text
+@toon-cyclic-discriminated-array/1
+@root {"events":"$C0"}
+@array $C0 discr=type n=8 common=tenant,seq order=cycle(login,purchase)*4
+@common
+"acme"	1
+"acme"	2
+"acme"	3
+"acme"	4
+"acme"	5
+"acme"	6
+"acme"	7
+"acme"	8
+@group login n=4
+{"ok":true}
+{"ok":false}
+{"ok":true}
+{"ok":true}
+@group purchase n=4
+{"amount":12.5}
+{"amount":4}
+{"amount":7}
+{"amount":1}
+@end
+```
+
+Spec: [Cyclic discriminated arrays](../../docs/proposals/cyclic-discriminated-arrays.md).
+
+## `--delimiter`
+
+Input:
+
+```json
+{"rows":[{"id":1,"name":"Ada"}]}
+```
+
+Command:
+
+```bash
+tq -p json -o toon --delimiter pipe .
+```
+
+Output:
+
+```toon
+rows[1|]{id|name}:
+  1|Ada
+```
+
+Spec: [Delimiter choice](../../docs/proposals/delimiter-choice.md).
+
+## TOONL Query
+
+TOONL input reads one flat record per row. Without `--slurp`, the query runs once per row.
+
+Input:
 
 ```toonl
 []{id,name}:
@@ -83,41 +259,141 @@ printf '{"id":1,"name":"Ada"}\n{"id":2,"name":"Linus"}\n' | tq -p json -o toonl 
 [=2]
 ```
 
-- `-p toonl` streams rows through the query. Without `--slurp`, the query runs once per row.
-- `--slurp` evaluates the query against a single array of all TOONL rows.
-- `-o toonl` emits TOONL using the same encoder flags where applicable.
-- Tagged multiplexing is part of the TOONL v0.2 library surface; the CLI reads tagged streams and the `close` command can render them per-lane or interleaved.
+Command:
+
+```bash
+tq -p toonl -o json -c .name
+```
+
+Output:
+
+```json
+"Ada"
+"Linus"
+```
+
+TOONL output writes append-only segments and rotates schemas as needed.
+
+Input:
+
+```jsonl
+{"id":1,"name":"Ada"}
+{"id":2,"name":"Linus"}
+```
+
+Command:
+
+```bash
+tq -p json -o toonl .
+```
+
+Output:
+
+```toonl
+[]{id,name}:
+1,Ada
+2,Linus
+[=2]
+```
 
 ## close
 
 `tq close` materializes TOONL into canonical closed TOON documents.
 
-```bash
-tq close events.toonl
-tq close --interleaved events.toonl
+Input:
+
+```toonl
+[]<req>{method,path,status}:
+[]<metric>{name,value}:
+req:GET,/health,200
+metric:cpu,0.42
+[]{event}:
+[~]{event}:
+started
+req:POST,/login,401
+metric:mem,0.70
 ```
 
-- `--per-lane` is the default. Each lane segment becomes one canonical TOON document.
-- `--interleaved` preserves tagged row-run interleaving for post-mortem rendering.
+Command:
+
+```bash
+tq close
+```
+
+Output:
+
+```toon
+[2]{method,path,status}:
+  GET,/health,200
+  POST,/login,401
+[2]{name,value}:
+  cpu,0.42
+  mem,0.70
+[1]{event}:
+  started
+```
+
+`tq close --interleaved` preserves tagged row-run interleaving.
 
 ## trim
 
 `tq trim --keep-last N` applies the TOONL v0.2 header-preserving suffix trim.
 
-```bash
-tq trim --keep-last 100 events.toonl
-tq trim --keep-last 100 --in-place events.toonl
+Input:
+
+```toonl
+[]{id,name}:
+1,Ada
+2,Linus
+3,Grace
+[=3]
 ```
 
-The trimmed output keeps the headers needed to make the retained suffix readable. `--in-place` writes the file atomically and requires an explicit file path.
+Command:
+
+```bash
+tq trim --keep-last 2
+```
+
+Output:
+
+```toonl
+[]{id,name}:
+2,Linus
+3,Grace
+[=2]
+```
+
+`--in-place` writes the file atomically and requires an explicit file path.
 
 ## check
 
 `tq check` runs structured truncation detection for TOON or TOONL and prints JSON.
 
+Input:
+
+```toon
+items[2]:
+  - one
+```
+
+Command:
+
 ```bash
-tq check -p toon document.toon
-tq check -p toonl stream.toonl
+tq check -p toon
+```
+
+Output:
+
+```json
+{
+  "complete": false,
+  "kind": "array_length_mismatch",
+  "line": 1,
+  "declared": 2,
+  "actual": 1,
+  "message": "array declared 2 rows but found 1"
+}
 ```
 
 Complete input exits successfully. Truncated or invalid input exits non-zero and reports `complete`, `kind`, `line`, `declared`, `actual`, and `message`. The report model is specified in [detectTruncation](../../docs/proposals/detect-truncation.md).
