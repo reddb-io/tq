@@ -26,8 +26,9 @@ import {
 /** Spaces per indentation level unless `options.indent` says otherwise. */
 export const DEFAULT_INDENT = 2
 export const DEFAULT_MAX_DEPTH = 1000
-const CYCLIC_DISCRIMINATED_ARRAY_SENTINEL = '@toon-cyclic-discriminated-array/1'
 const CYCLIC_DISCRIMINATOR_KEYS = ['type', 'kind', 'event']
+const CYCLIC_TABLE_DELIMITER = '|'
+const CYCLIC_META_KEYS = new Set(['order', 'discriminator', 'rows', 'common'])
 
 function resolveOptions(options = {}) {
   const rawMaxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH
@@ -37,6 +38,7 @@ function resolveOptions(options = {}) {
     strict: options.strict ?? true,
     // The spec spells this `expandPaths: "safe"`; a boolean is accepted too.
     expandPaths: options.expandPaths === 'safe' || options.expandPaths === true,
+    cyclicDiscriminatedArrays: options.cyclicDiscriminatedArrays !== false,
     maxDepth,
   }
 }
@@ -123,10 +125,6 @@ function checkHeaderDepth(header, line, options) {
 
 /** Decodes TOON per spec §5 root-form discovery. */
 export function parse(input, options) {
-  if (splitLines(input)[0] === CYCLIC_DISCRIMINATED_ARRAY_SENTINEL) {
-    return parseCyclicDiscriminatedArrayWire(input)
-  }
-
   const resolved = resolveOptions(options)
   const lines = collectLines(input, resolved)
   const first = lines[0]
@@ -168,227 +166,84 @@ export function parse(input, options) {
   if (trailing !== undefined) {
     throw toonError(trailing.number, 'expected end of document')
   }
-  return document
+  return resolved.cyclicDiscriminatedArrays ? expandCyclicDiscriminatedArrays(document) : document
 }
 
-function parseCyclicDiscriminatedArrayWire(input) {
-  const lines = splitLines(input).map((content, index) => ({ number: index + 1, content }))
-  let index = 0
-
-  index = expectCyclicLine(lines, index, CYCLIC_DISCRIMINATED_ARRAY_SENTINEL)
-  const rootLine = cyclicNextLine(lines, index)
-  index += 1
-  const root = parseCyclicRoot(rootLine.content, rootLine.number)
-
-  const sections = new Map()
-  while (index < lines.length) {
-    const line = lines[index]
-    if (line.content === '@end') {
-      index += 1
-      break
-    }
-    if (!line.content.startsWith('@array ')) {
-      throw cyclicInvalid(line.number)
-    }
-    const section = parseCyclicArraySection(lines, index)
-    index = section.index
-    if (sections.has(section.id)) {
-      throw cyclicInvalid(line.number)
-    }
-    sections.set(section.id, section.value)
+function expandCyclicDiscriminatedArrays(document) {
+  if (!isPlainObject(document) || Object.keys(document).length === 0) {
+    return document
   }
-
-  if (index !== lines.length) {
-    throw cyclicInvalid(lines[index].number)
-  }
-  if (sections.size === 0) {
-    throw cyclicInvalid(lines.at(-1)?.number ?? 1)
-  }
-
-  const document = {}
-  for (const [key, sectionId] of root) {
-    if (!sections.has(sectionId)) {
-      throw cyclicInvalid(2)
+  const expanded = {}
+  for (const [key, value] of Object.entries(document)) {
+    const section = cyclicArrayFromTabularObject(value, 1)
+    if (section === undefined) {
+      return document
     }
-    setKey(document, key, sections.get(sectionId))
-    sections.delete(sectionId)
+    setKey(expanded, key, section)
   }
-  return document
+  return expanded
 }
 
-function parseCyclicRoot(content, line) {
-  const json = content.startsWith('@root ') ? content.slice('@root '.length) : undefined
-  if (json === undefined) {
+function cyclicArrayFromTabularObject(section, line) {
+  if (!isPlainObject(section)) {
+    return undefined
+  }
+  if (!isCyclicSectionLike(section)) {
+    return undefined
+  }
+  const { order, discriminator, rows } = section
+  if (typeof order !== 'string' || typeof discriminator !== 'string' || !Number.isSafeInteger(rows) || rows < 0) {
     throw cyclicInvalid(line)
   }
-  let value
-  try {
-    value = JSON.parse(json)
-  } catch {
-    throw cyclicInvalid(line)
+  const labels = parseCyclicOrder(order, rows, line)
+  const common = section.common
+  const commonRows = common === undefined ? Array.from({ length: rows }, () => ({})) : common
+  if (!Array.isArray(commonRows) || commonRows.length !== rows || !commonRows.every(isPlainObject)) {
+    throw cyclicLengthMismatch(line)
   }
-  if (!isPlainObject(value) || Object.keys(value).length === 0) {
-    throw cyclicInvalid(line)
-  }
-  return Object.entries(value).map(([key, sectionId]) => {
-    if (typeof sectionId !== 'string') {
+
+  const groups = new Map()
+  for (const [label, table] of Object.entries(section)) {
+    if (CYCLIC_META_KEYS.has(label)) {
+      continue
+    }
+    if (!Array.isArray(table) || !table.every(isPlainObject)) {
       throw cyclicInvalid(line)
     }
-    return [key, sectionId]
-  })
-}
-
-function parseCyclicArraySection(lines, index) {
-  const headerLine = cyclicNextLine(lines, index)
-  const header = parseCyclicArrayHeader(headerLine.content, headerLine.number)
-  index += 1
-
-  const common = parseCyclicCommonRows(lines, index, header)
-  index = common.index
-  const groups = new Map()
-  while (index < lines.length) {
-    const line = lines[index]
-    if (line.content === '@end' || line.content.startsWith('@array ')) {
-      break
-    }
-    if (!line.content.startsWith('@group ')) {
-      throw cyclicInvalid(line.number)
-    }
-    const group = parseCyclicGroup(lines, index)
-    index = group.index
-    if (groups.has(group.label)) {
-      throw cyclicInvalid(line.number)
-    }
-    groups.set(group.label, group.rows)
+    groups.set(label, table)
+  }
+  if (groups.size === 0) {
+    throw cyclicInvalid(line)
   }
 
-  const order = parseCyclicOrder(header.order, header.len, headerLine.number)
   const cursors = new Map()
-  const values = []
-  for (let position = 0; position < order.length; position += 1) {
-    const label = order[position]
+  const values = labels.map((label, index) => {
     const group = groups.get(label)
     if (group === undefined) {
-      throw cyclicGroupLengthMismatch(headerLine.number)
+      throw cyclicGroupLengthMismatch(line)
     }
     const cursor = cursors.get(label) ?? 0
     const payload = group[cursor]
     if (payload === undefined) {
-      throw cyclicGroupLengthMismatch(headerLine.number)
+      throw cyclicGroupLengthMismatch(line)
     }
     cursors.set(label, cursor + 1)
-    values.push(mergeCyclicRow(header.discriminator, label, common.rows[position], payload, headerLine.number))
-  }
-
+    return mergeCyclicRow(discriminator, label, commonRows[index], payload, line)
+  })
   for (const [label, group] of groups) {
     if ((cursors.get(label) ?? 0) !== group.length) {
-      throw cyclicGroupLengthMismatch(headerLine.number)
+      throw cyclicGroupLengthMismatch(line)
     }
   }
-
-  return { id: header.id, value: values, index }
+  return values
 }
 
-function parseCyclicArrayHeader(content, line) {
-  const rest = content.startsWith('@array ') ? content.slice('@array '.length) : undefined
-  if (rest === undefined) {
-    throw cyclicInvalid(line)
-  }
-  const split = rest.indexOf(' ')
-  if (split === -1) {
-    throw cyclicInvalid(line)
-  }
-  const id = rest.slice(0, split)
-  const parts = rest.slice(split + 1).trim().split(/\s+/)
-  if (parts.length !== 4) {
-    throw cyclicInvalid(line)
-  }
-  const discriminator = parts[0].startsWith('discr=') ? parts[0].slice('discr='.length) : ''
-  if (discriminator === '') {
-    throw cyclicInvalid(line)
-  }
-  if (!parts[1].startsWith('n=')) {
-    throw cyclicInvalid(line)
-  }
-  const len = parseCyclicUsize(parts[1].slice('n='.length), line)
-  const commonPart = parts[2].startsWith('common=') ? parts[2].slice('common='.length) : undefined
-  if (commonPart === undefined) {
-    throw cyclicInvalid(line)
-  }
-  const common = commonPart === '' ? [] : commonPart.split(',')
-  if (common.some((field) => field === '') || new Set(common).size !== common.length) {
-    throw cyclicInvalid(line)
-  }
-  const order = parts[3].startsWith('order=') ? parts[3].slice('order='.length) : ''
-  if (order === '') {
-    throw cyclicInvalid(line)
-  }
-  return { id, discriminator, len, common, order }
-}
-
-function parseCyclicCommonRows(lines, index, header) {
-  if (header.common.length === 0) {
-    if (lines[index]?.content === '@common') {
-      throw cyclicInvalid(lines[index].number)
-    }
-    return { rows: Array.from({ length: header.len }, () => ({})), index }
-  }
-
-  index = expectCyclicLine(lines, index, '@common')
-  const rows = []
-  for (let rowIndex = 0; rowIndex < header.len; rowIndex += 1) {
-    const line = cyclicNextLine(lines, index)
-    if (line.content.startsWith('@')) {
-      throw cyclicLengthMismatch(line.number)
-    }
-    const cells = line.content.split('\t')
-    if (cells.length !== header.common.length) {
-      throw cyclicLengthMismatch(line.number)
-    }
-    const row = {}
-    header.common.forEach((key, cellIndex) => {
-      setKey(row, key, parseCyclicJsonCell(cells[cellIndex], line.number))
-    })
-    rows.push(row)
-    index += 1
-  }
-  return { rows, index }
-}
-
-function parseCyclicGroup(lines, index) {
-  const headerLine = cyclicNextLine(lines, index)
-  const { label, len } = parseCyclicGroupHeader(headerLine.content, headerLine.number)
-  index += 1
-
-  const rows = []
-  for (let rowIndex = 0; rowIndex < len; rowIndex += 1) {
-    const line = cyclicNextLine(lines, index)
-    if (line.content.startsWith('@')) {
-      throw cyclicGroupLengthMismatch(line.number)
-    }
-    rows.push(parseCyclicJsonObject(line.content, line.number))
-    index += 1
-  }
-  const next = lines[index]
-  if (next !== undefined && !next.content.startsWith('@')) {
-    throw cyclicGroupLengthMismatch(next.number)
-  }
-  return { label, rows, index }
-}
-
-function parseCyclicGroupHeader(content, line) {
-  const rest = content.startsWith('@group ') ? content.slice('@group '.length) : undefined
-  if (rest === undefined) {
-    throw cyclicInvalid(line)
-  }
-  const split = rest.indexOf(' n=')
-  if (split === -1) {
-    throw cyclicInvalid(line)
-  }
-  return {
-    label: percentDecode(rest.slice(0, split), line),
-    len: parseCyclicUsize(rest.slice(split + ' n='.length), line),
-  }
+function isCyclicSectionLike(value) {
+  return (
+    Object.prototype.hasOwnProperty.call(value, 'order') ||
+    Object.prototype.hasOwnProperty.call(value, 'discriminator') ||
+    Object.prototype.hasOwnProperty.call(value, 'rows')
+  )
 }
 
 function parseCyclicOrder(encoded, len, line) {
@@ -423,16 +278,14 @@ function parseCyclicOrder(encoded, len, line) {
 function mergeCyclicRow(discriminator, label, common, payload, line) {
   const row = {}
   setKey(row, discriminator, label)
-  if (common !== undefined) {
-    for (const [key, value] of Object.entries(common)) {
-      if (key === discriminator) {
-        throw cyclicInvalid(line)
-      }
-      setKey(row, key, value)
+  for (const [key, value] of Object.entries(common ?? {})) {
+    if (key === discriminator || Object.prototype.hasOwnProperty.call(row, key)) {
+      throw cyclicInvalid(line)
     }
+    setKey(row, key, value)
   }
-  for (const [key, value] of Object.entries(payload)) {
-    if (Object.prototype.hasOwnProperty.call(row, key)) {
+  for (const [key, value] of Object.entries(inflateCyclicFlatObject(payload, line))) {
+    if (key === discriminator || Object.prototype.hasOwnProperty.call(row, key)) {
       throw cyclicInvalid(line)
     }
     setKey(row, key, value)
@@ -440,36 +293,49 @@ function mergeCyclicRow(discriminator, label, common, payload, line) {
   return row
 }
 
-function parseCyclicJsonCell(input, line) {
-  try {
-    return JSON.parse(input)
-  } catch {
+function inflateCyclicFlatObject(value, line) {
+  const nested = {}
+  for (const [key, cell] of Object.entries(value)) {
+    setCyclicPath(nested, key.split('.'), cell, line)
+  }
+  return inflateCyclicArrays(nested, line)
+}
+
+function setCyclicPath(target, path, value, line) {
+  if (path.some((segment) => segment === '')) {
     throw cyclicInvalid(line)
+  }
+  let cursor = target
+  for (let index = 0; index < path.length; index += 1) {
+    const segment = path[index]
+    if (index === path.length - 1) {
+      cursor[segment] = value
+      return
+    }
+    cursor[segment] ??= {}
+    cursor = cursor[segment]
+    if (!isPlainObject(cursor)) {
+      throw cyclicInvalid(line)
+    }
   }
 }
 
-function parseCyclicJsonObject(input, line) {
-  const value = parseCyclicJsonCell(input, line)
+function inflateCyclicArrays(value, line) {
+  if (Array.isArray(value)) {
+    return value.map((item) => inflateCyclicArrays(item, line))
+  }
   if (!isPlainObject(value)) {
-    throw cyclicInvalid(line)
+    return value
   }
-  return value
-}
-
-function expectCyclicLine(lines, index, expected) {
-  const line = cyclicNextLine(lines, index)
-  if (line.content !== expected) {
-    throw cyclicInvalid(line.number)
+  if (Number.isSafeInteger(value.length) && value.length >= 0) {
+    return Array.from({ length: value.length }, (_, index) => {
+      if (!Object.prototype.hasOwnProperty.call(value, String(index))) {
+        throw cyclicInvalid(line)
+      }
+      return inflateCyclicArrays(value[String(index)], line)
+    })
   }
-  return index + 1
-}
-
-function cyclicNextLine(lines, index) {
-  const line = lines[index]
-  if (line === undefined) {
-    throw cyclicInvalid((lines.at(-1)?.number ?? 0) + 1)
-  }
-  return line
+  return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, inflateCyclicArrays(nested, line)]))
 }
 
 function parseCyclicUsize(input, line) {
@@ -489,6 +355,10 @@ function percentDecode(input, line) {
   } catch {
     throw cyclicInvalid(line)
   }
+}
+
+function percentEncode(value) {
+  return encodeURIComponent(value)
 }
 
 function cyclicInvalid(line) {
@@ -521,28 +391,11 @@ function cyclicDiscriminatedArrayWire(value) {
     sections.push([key, section])
   }
 
-  const root = Object.fromEntries(sections.map(([key], index) => [key, `$C${index}`]))
-  const output = [CYCLIC_DISCRIMINATED_ARRAY_SENTINEL, `@root ${JSON.stringify(root)}`]
-  for (let index = 0; index < sections.length; index += 1) {
-    const [, section] = sections[index]
-    output.push(
-      `@array $C${index} discr=${section.discriminator} n=${section.rows.length} common=${section.common.join(',')} order=${section.order.encoded}`,
-    )
-    if (section.common.length > 0) {
-      output.push('@common')
-      for (const row of section.rows) {
-        output.push(section.common.map((key) => cyclicJsonText(row[key])).join('\t'))
-      }
-    }
-    for (const [label, payloads] of section.groups) {
-      output.push(`@group ${percentEncode(label)} n=${payloads.length}`)
-      for (const payload of payloads) {
-        output.push(cyclicJsonText(payload))
-      }
-    }
+  const output = []
+  for (const [key, section] of sections) {
+    writeCyclicSection(output, key, section)
   }
-  output.push('@end')
-  return `${output.join('\n')}\n`
+  return output.join('')
 }
 
 function cyclicDiscriminatedArraySection(rows) {
@@ -568,15 +421,30 @@ function cyclicDiscriminatedArraySection(rows) {
     const payload = {}
     for (const [key, nested] of Object.entries(row)) {
       if (key !== discriminator && !common.includes(key)) {
-        setKey(payload, key, nested)
+        if (!flattenCyclicValue(nested, key, payload)) {
+          return undefined
+        }
       }
-    }
-    if (cyclicJsonText(payload) === undefined) {
-      return undefined
     }
     groups.get(label).push(payload)
   }
-  return { common, discriminator, groups, order, rows }
+  const encodedGroups = []
+  for (const label of order.cycle) {
+    const payloads = groups.get(label)
+    const fields = cyclicUniformFields(payloads)
+    if (fields === undefined || fields.length === 0) {
+      return undefined
+    }
+    encodedGroups.push({ fields, label, rows: payloads })
+  }
+  return {
+    common,
+    commonRows: rows.map((row) => Object.fromEntries(common.map((key) => [key, row[key]]))),
+    discriminator,
+    groups: encodedGroups,
+    order,
+    rows,
+  }
 }
 
 function cyclicDiscriminator(rows) {
@@ -613,7 +481,9 @@ function cyclicOrder(labels) {
 
 function cyclicCommonPrefixKeys(rows, discriminator) {
   const prefix = []
-  for (const key of Object.keys(rows[0]).filter((candidate) => candidate !== discriminator)) {
+  const keys = Object.keys(rows[0])
+  const start = keys.indexOf(discriminator) + 1
+  for (const key of keys.slice(start).filter((candidate) => candidate !== discriminator)) {
     if (!isCyclicHeaderKey(key)) {
       break
     }
@@ -623,52 +493,63 @@ function cyclicCommonPrefixKeys(rows, discriminator) {
     if (!rows.every((row) => isPrimitive(row[key]))) {
       break
     }
-    if (rows.some((row) => cyclicJsonText(row[key]) === undefined)) {
-      break
-    }
-    const encodedValues = rows.map((row) => cyclicJsonText(row[key]))
-    const uniqueValues = new Set(encodedValues)
-    if (uniqueValues.size !== 1 && uniqueValues.size !== rows.length) {
-      break
-    }
     prefix.push(key)
   }
   return prefix
 }
 
-function cyclicJsonText(value) {
-  if (!isCyclicJsonValue(value)) {
-    return undefined
+function writeCyclicSection(output, key, section) {
+  output.push(canonicalKey(key), ':\n')
+  output.push('  order: ', primitiveText(section.order.encoded, CYCLIC_TABLE_DELIMITER), '\n')
+  output.push('  discriminator: ', primitiveText(section.discriminator, CYCLIC_TABLE_DELIMITER), '\n')
+  output.push('  rows: ', String(section.rows.length), '\n')
+  if (section.common.length > 0) {
+    writeCyclicTable(output, 'common', section.common, section.commonRows)
   }
-  try {
-    const text = JSON.stringify(value)
-    return text === undefined ? undefined : text
-  } catch {
-    return undefined
+  for (const group of section.groups) {
+    writeCyclicTable(output, group.label, group.fields, group.rows)
   }
 }
 
-function percentEncode(value) {
-  return encodeURIComponent(value)
+function writeCyclicTable(output, key, fields, rows) {
+  output.push(
+    '  ',
+    canonicalKey(key),
+    '[',
+    String(rows.length),
+    CYCLIC_TABLE_DELIMITER,
+    ']{',
+    fields.map(canonicalKey).join(CYCLIC_TABLE_DELIMITER),
+    '}:\n',
+  )
+  for (const row of rows) {
+    output.push(
+      '    ',
+      fields.map((field) => primitiveText(row[field], CYCLIC_TABLE_DELIMITER)).join(CYCLIC_TABLE_DELIMITER),
+      '\n',
+    )
+  }
 }
 
 function isCyclicHeaderKey(value) {
-  return value !== '' && !/[\s,]/.test(value)
+  return value !== '' && isBareCyclicPath(value)
 }
 
-function isCyclicJsonValue(value, seen = new Set()) {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
-    return true
+function flattenCyclicValue(value, prefix, out, seen = new Set()) {
+  if (!isBareCyclicPath(prefix)) {
+    return false
   }
-  if (typeof value === 'number') {
-    return Number.isFinite(value)
+  if (isPrimitive(value)) {
+    out[prefix] = value
+    return true
   }
   if (Array.isArray(value)) {
     if (seen.has(value)) {
       return false
     }
     seen.add(value)
-    const valid = value.every((item) => isCyclicJsonValue(item, seen))
+    out[`${prefix}.length`] = value.length
+    const valid = value.every((item, index) => flattenCyclicValue(item, `${prefix}.${index}`, out, seen))
     seen.delete(value)
     return valid
   }
@@ -677,11 +558,27 @@ function isCyclicJsonValue(value, seen = new Set()) {
       return false
     }
     seen.add(value)
-    const valid = Object.values(value).every((item) => isCyclicJsonValue(item, seen))
+    const valid = Object.entries(value).every(([key, nested]) => !key.includes('.') && flattenCyclicValue(nested, `${prefix}.${key}`, out, seen))
     seen.delete(value)
     return valid
   }
   return false
+}
+
+function cyclicUniformFields(rows) {
+  const fields = Object.keys(rows[0] ?? {})
+  if (!rows.every((row) => sameStringArray(Object.keys(row), fields))) {
+    return undefined
+  }
+  return fields.every(isBareCyclicPath) ? fields : undefined
+}
+
+function sameStringArray(left, right) {
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+function isBareCyclicPath(value) {
+  return value.split('.').every((segment) => /^[A-Za-z_][A-Za-z0-9_]*$|^(?:0|[1-9][0-9]*)$/.test(segment))
 }
 
 /**
